@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Select faculty – Grant Tracker{% endblock %}
+{% block content %}
+
+<section>
+  <h1>Select a faculty member</h1>
+  <p class="hint">Each faculty member has their own separate database of grants, students, departments, and scenarios.</p>
+
+  <table>
+    <thead><tr><th>Name</th><th></th></tr></thead>
+    <tbody>
+      {% for f in faculty %}
+      <tr>
+        <td>{{ f.name }}{% if f.slug == current %} <span class="badge badge-active">current</span>{% endif %}</td>
+        <td>
+          <form method="post" action="{{ url_for('select_faculty') }}" class="inline-form">
+            <input type="hidden" name="slug" value="{{ f.slug }}">
+            <button type="submit">{{ "Continue" if f.slug == current else "Switch to this" }}</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="2" class="empty">No faculty databases yet — create one below.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <details {{ "open" if not faculty else "" }}>
+    <summary>New faculty member</summary>
+    <form method="post" action="{{ url_for('add_faculty') }}" class="form-grid">
+      <label>Name <input name="name" placeholder="e.g. Jane Smith" required></label>
+      <button type="submit">Create database</button>
+    </form>
+    <p class="hint">This creates a brand-new, empty database for this faculty member.</p>
+  </details>
+</section>
+
+{% endblock %}

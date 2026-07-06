@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Departments – Grant Tracker{% endblock %}
+{% block content %}
+
+<a href="{{ url_for('index') }}" class="back">&larr; Dashboard</a>
+
+<section>
+  <h1>Departments</h1>
+  <p class="hint">
+    Departmental billing rates applied to a student's stipend: tuition remission (a flat $/month, prorated by
+    allocation %) and a fringe benefit rate (% of stipend). Overhead/F&amp;A rates are set per grant instead, since
+    those are negotiated with each sponsor.
+  </p>
+
+  <table>
+    <thead><tr><th>Name</th><th>Tuition / month</th><th>Fringe rate</th><th></th></tr></thead>
+    <tbody>
+      {% for d in departments %}
+      <tr>
+        <td>{{ d.name }}</td>
+        <td>${{ d.tuition_cents_per_month | money }}</td>
+        <td>{{ d.fringe_rate_bps | rate }}%</td>
+        <td>
+          <details>
+            <summary>Edit</summary>
+            <form method="post" action="{{ url_for('edit_department', department_id=d.id) }}" class="form-grid">
+              <label>Name <input name="name" value="{{ d.name }}" required></label>
+              <label>Tuition / month <input name="tuition" type="number" step="0.01" min="0" value="{{ d.tuition_cents_per_month | money }}"></label>
+              <label>Fringe rate (%) <input name="fringe_rate" type="number" step="0.01" min="0" value="{{ d.fringe_rate_bps | rate }}"></label>
+              <button type="submit">Save</button>
+            </form>
+            <form method="post" action="{{ url_for('delete_department', department_id=d.id) }}"
+                  onsubmit="return confirm('Delete this department? This only works if no students belong to it.');">
+              <button type="submit" class="danger">Delete</button>
+            </form>
+          </details>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="empty">No departments yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <details>
+    <summary>Add department</summary>
+    <form method="post" action="{{ url_for('add_department') }}" class="form-grid">
+      <label>Name <input name="name" required></label>
+      <label>Tuition / month <input name="tuition" type="number" step="0.01" min="0" value="0"></label>
+      <label>Fringe rate (%) <input name="fringe_rate" type="number" step="0.01" min="0" value="0"></label>
+      <button type="submit">Add department</button>
+    </form>
+  </details>
+</section>
+
+{% endblock %}

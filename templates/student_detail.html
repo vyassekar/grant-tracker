@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}{{ student.name }} – Grant Tracker{% endblock %}
+{% block content %}
+
+<a href="{{ url_for('index') }}" class="back">&larr; Dashboard</a>
+
+<form method="get" class="scenario-switcher">
+  <label>Viewing
+    <select name="scenario" onchange="this.form.submit()">
+      <option value="">Live</option>
+      {% for s in scenarios %}
+      <option value="{{ s.id }}" {{ "selected" if s.id == current_scenario_id else "" }}>{{ s.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+</form>
+{% if current_scenario_id %}
+<div class="scenario-banner">You're viewing a what-if scenario. Allocation changes here won't affect live data unless you apply the scenario.</div>
+{% endif %}
+
+<section>
+  <h1>{{ student.name }}</h1>
+  <p class="meta">{{ student.email }} &middot; {{ student.department_name or "No department" }} &middot; ${{ student.stipend_cents_per_month | money }}/month stipend</p>
+  {% if student.notes %}<p class="notes">{{ student.notes }}</p>{% endif %}
+
+  <details>
+    <summary>Edit student</summary>
+    <form method="post" action="{{ url_for('edit_student', student_id=student.id) }}" class="form-grid">
+      <label>Name <input name="name" value="{{ student.name }}" required></label>
+      <label>Email <input name="email" type="email" value="{{ student.email }}"></label>
+      <label>Department
+        <select name="department_id">
+          <option value="">None</option>
+          {% for d in departments %}
+          <option value="{{ d.id }}" {{ "selected" if d.id == student.department_id else "" }}>{{ d.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Monthly stipend <input name="stipend" type="number" step="0.01" min="0" value="{{ student.stipend_cents_per_month | money }}"></label>
+      <label>Notes <input name="notes" value="{{ student.notes }}"></label>
+      <button type="submit">Save changes</button>
+    </form>
+    <form method="post" action="{{ url_for('delete_student', student_id=student.id) }}"
+          onsubmit="return confirm('Delete this student? This only works if they have no allocations.');">
+      <button type="submit" class="danger">Delete student</button>
+    </form>
+  </details>
+</section>
+
+<section>
+  <h2>Monthly allocation</h2>
+  {% if grid %}
+  <div class="grid-wrapper">
+    <table class="alloc-grid">
+      <thead>
+        <tr><th>Grant</th>{% for label in grid.month_labels %}<th>{{ label }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for row in grid.rows %}
+        <tr>
+          <td><a href="{{ url_for('grant_detail', grant_id=row.grant_id, scenario=current_scenario_id) }}">{{ row.name }}</a></td>
+          {% for cell in row.cells %}
+          <td class="alloc-cell">{% if cell %}<span class="alloc-pill" style="opacity: {{ (cell / 100 * 0.7 + 0.3) | round(2) }};">{{ cell }}%</span>{% endif %}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>Total allocated</td>
+          {% for total in grid.totals %}
+          <td class="{{ 'over-allocated' if total > 100 else '' }}">{{ total }}%</td>
+          {% endfor %}
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div class="stats">
+    <div><span class="stat-label">Stipend</span><span class="stat-value">${{ grid.breakdown.stipend | money }}</span></div>
+    <div><span class="stat-label">Tuition</span><span class="stat-value">${{ grid.breakdown.tuition | money }}</span></div>
+    <div><span class="stat-label">Fringe</span><span class="stat-value">${{ grid.breakdown.fringe | money }}</span></div>
+    <div><span class="stat-label">Overhead</span><span class="stat-value">${{ grid.breakdown.overhead | money }}</span></div>
+    <div><span class="stat-label">Total (shown period)</span><span class="stat-value">${{ grid.breakdown.total | money }}</span></div>
+  </div>
+  {% else %}
+  <p class="empty">Not yet allocated to any grant{{ " in this scenario" if current_scenario_id else "" }}.</p>
+  {% endif %}
+
+  <details>
+    <summary>Allocate to a grant</summary>
+    <form method="post" action="{{ url_for('set_allocation') }}" class="form-grid">
+      <input type="hidden" name="student_id" value="{{ student.id }}">
+      <input type="hidden" name="scenario_id" value="{{ current_scenario_id or '' }}">
+      <input type="hidden" name="return_view" value="student">
+      <input type="hidden" name="return_id" value="{{ student.id }}">
+      <label>Grant
+        <select name="grant_id" required>
+          {% for grant in grants %}
+          <option value="{{ grant.id }}">{{ grant.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>From month <input name="month_start" type="month" value="{{ today[:7] }}" required></label>
+      <label>To month <input name="month_end" type="month" value="{{ today[:7] }}" required></label>
+      <label>Percent <input name="percent" type="number" min="0" max="100" step="1" required></label>
+      <button type="submit">Set allocation</button>
+    </form>
+    <p class="hint">Set percent to 0 to clear a range. This applies to {{ "the selected scenario" if current_scenario_id else "live data" }}.</p>
+  </details>
+</section>
+
+{% endblock %}

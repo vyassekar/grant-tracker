@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Scenarios – Grant Tracker{% endblock %}
+{% block content %}
+
+<a href="{{ url_for('index') }}" class="back">&larr; Dashboard</a>
+
+<section>
+  <h1>What-if scenarios</h1>
+  <p class="hint">
+    A scenario is a copy of your live allocations that you can freely move around without affecting real data.
+    Set the first change below when you create it, then make further changes any time by opening a grant or
+    student page and using the "Viewing" dropdown to switch into the scenario.
+  </p>
+
+  <table>
+    <thead><tr><th>Name</th><th>Created</th><th></th></tr></thead>
+    <tbody>
+      {% for s in scenarios %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td>{{ s.created_at }}</td>
+        <td>
+          <form method="post" action="{{ url_for('apply_scenario', scenario_id=s.id) }}" class="inline-form"
+                onsubmit="return confirm('Apply this scenario to live data? This replaces all current live allocations.');">
+            <button type="submit">Apply to live</button>
+          </form>
+          <form method="post" action="{{ url_for('delete_scenario', scenario_id=s.id) }}" class="inline-form"
+                onsubmit="return confirm('Delete this scenario?');">
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="empty">No scenarios yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <details>
+    <summary>New scenario</summary>
+    <form method="post" action="{{ url_for('add_scenario') }}" class="form-grid">
+      <label>Name <input name="name" placeholder="e.g. Move Alex to NIH grant" required></label>
+      {% if students and grants %}
+      <label>Student
+        <select name="student_id">
+          <option value="">(no change yet)</option>
+          {% for student in students %}
+          <option value="{{ student.id }}">{{ student.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Grant
+        <select name="grant_id">
+          <option value="">(no change yet)</option>
+          {% for grant in grants %}
+          <option value="{{ grant.id }}">{{ grant.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>From month <input name="month_start" type="month" value="{{ today[:7] }}"></label>
+      <label>To month <input name="month_end" type="month" value="{{ today[:7] }}"></label>
+      <label>Percent <input name="percent" type="number" min="0" max="100" step="1"></label>
+      <button type="submit">Create scenario</button>
+    </form>
+    <p class="hint">
+      Leave Student/Grant blank to just start from a plain copy of live data. Otherwise this sets that
+      student's allocation to the given grant and percent for the chosen months, right in the new scenario.
+    </p>
+    {% else %}
+      <button type="submit">Create scenario</button>
+    </form>
+    <p class="hint">Add at least one student and one grant first to set an allocation change here.</p>
+    {% endif %}
+</section>
+
+{% endblock %}
