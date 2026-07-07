@@ -894,6 +894,77 @@ def apply_allocation(db, scenario_id, student_id, grant_id, month_start_raw, mon
     return None
 
 
+def apply_allocation_batch(db, scenario_id, student_id, grant_percent_pairs, month_start_raw, month_end_raw):
+    """Validate and write several (grant_id, percent) allocations for one student over a
+    month range, all at once.
+
+    Unlike apply_allocation (one grant at a time, validated against whatever is already
+    in the database), this validates the *combined* new total up front before writing
+    anything. That matters for rebalancing: reducing grant A from 100% to 50% while
+    raising grant B from 0% to 50% would fail with apply_allocation if you raised B
+    first (A is still at 100% at that instant) -- here both changes are checked together
+    against each other, plus any grant not included in the batch, and only written if
+    the whole batch keeps every month at <=100%.
+
+    Returns an error message string on failure, or None on success. Rows with percent 0
+    clear that grant's allocation for the range, same as apply_allocation.
+    """
+    student = db.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
+    month_start = parse_month(month_start_raw)
+    month_end = parse_month(month_end_raw)
+    if student is None:
+        return "Select a valid student."
+    if month_start is None or month_end is None:
+        return "Start and end month must be valid."
+    if month_end < month_start:
+        return "End month can't be before the start month."
+
+    rows = []
+    for grant_id_raw, percent_raw in grant_percent_pairs:
+        try:
+            grant_id = int(grant_id_raw)
+            percent = int(percent_raw)
+        except (TypeError, ValueError):
+            return "Grant and percent must be valid."
+        if not (0 <= percent <= 100):
+            return "Percent must be a whole number between 0 and 100."
+        if not db.execute("SELECT 1 FROM grants WHERE id = ?", (grant_id,)).fetchone():
+            return "Select a valid grant."
+        rows.append((grant_id, percent))
+
+    grant_ids = [grant_id for grant_id, _ in rows]
+    batch_total = sum(percent for _, percent in rows)
+    months = month_range(month_start, month_end)
+    clause, params = scenario_clause(scenario_id)
+
+    exclude_clause, exclude_params = "", ()
+    if grant_ids:
+        exclude_clause = f"AND grant_id NOT IN ({','.join('?' for _ in grant_ids)})"
+        exclude_params = tuple(grant_ids)
+
+    for month in months:
+        other_total = db.execute(
+            f"""SELECT COALESCE(SUM(percent), 0) AS total FROM allocations
+                WHERE student_id = ? AND month = ? {exclude_clause} AND {clause}""",
+            (student_id, month, *exclude_params, *params),
+        ).fetchone()["total"]
+        if other_total + batch_total > 100:
+            return f"{student['name']} would be over 100% allocated in {month_label(month)} ({other_total + batch_total}%)."
+
+    for grant_id, percent in rows:
+        for month in months:
+            db.execute(
+                f"DELETE FROM allocations WHERE student_id = ? AND grant_id = ? AND month = ? AND {clause}",
+                (student_id, grant_id, month, *params),
+            )
+            if percent > 0:
+                db.execute(
+                    "INSERT INTO allocations (scenario_id, student_id, grant_id, month, percent) VALUES (?, ?, ?, ?, ?)",
+                    (scenario_id, student_id, grant_id, month, percent),
+                )
+    return None
+
+
 @app.route("/allocations/set", methods=["POST"])
 def set_allocation():
     db = get_db()
@@ -994,8 +1065,28 @@ def scenarios_page():
     scenarios = db.execute("SELECT * FROM scenarios ORDER BY created_at DESC").fetchall()
     students = db.execute("SELECT * FROM students ORDER BY name").fetchall()
     grants = db.execute("SELECT * FROM grants ORDER BY name").fetchall()
+
+    live_allocations_by_student = {}
+    live_rows = db.execute(
+        """SELECT allocations.student_id, allocations.grant_id, grants.name AS grant_name,
+                  allocations.month, allocations.percent
+           FROM allocations JOIN grants ON grants.id = allocations.grant_id
+           WHERE allocations.scenario_id IS NULL"""
+    ).fetchall()
+    for row in live_rows:
+        live_allocations_by_student.setdefault(row["student_id"], []).append(
+            {"grant_id": row["grant_id"], "grant_name": row["grant_name"], "month": row["month"], "percent": row["percent"]}
+        )
+    grants_json = [{"id": g["id"], "name": g["name"]} for g in grants]
+
     return render_template(
-        "scenarios.html", scenarios=scenarios, students=students, grants=grants, today=date.today().isoformat()
+        "scenarios.html",
+        scenarios=scenarios,
+        students=students,
+        grants=grants,
+        grants_json=grants_json,
+        today=date.today().isoformat(),
+        live_allocations_by_student=live_allocations_by_student,
     )
 
 
@@ -1019,16 +1110,17 @@ def add_scenario():
     )
 
     student_id = request.form.get("student_id", "")
-    grant_id = request.form.get("grant_id", "")
-    if student_id and grant_id:
-        error = apply_allocation(
+    grant_ids = request.form.getlist("grant_id[]")
+    percents = request.form.getlist("percent[]")
+    rows = [(g, p) for g, p in zip(grant_ids, percents) if g]
+    if student_id and rows:
+        error = apply_allocation_batch(
             db,
             scenario_id,
             student_id,
-            grant_id,
+            rows,
             request.form.get("month_start", ""),
             request.form.get("month_end", ""),
-            request.form.get("percent", ""),
         )
         if error:
             db.rollback()

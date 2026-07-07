@@ -183,6 +183,105 @@ summary { cursor: pointer; font-weight: 600; color: var(--accent); }
   justify-self: start;
 }
 
+.alloc-editor {
+  grid-column: 1 / -1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+
+.alloc-rows { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.alloc-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.alloc-swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.alloc-row-name {
+  flex: 0 0 auto;
+  min-width: 8rem;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+}
+
+.alloc-row input[type="range"] { flex: 1; }
+
+.alloc-row-readout {
+  flex: 0 0 auto;
+  min-width: 2.5rem;
+  text-align: right;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.alloc-row-remove {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.3rem;
+}
+
+.alloc-row-remove:hover { color: #991b1b; }
+
+.alloc-add {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.alloc-add select {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.alloc-add button {
+  background: var(--surface);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  font-size: 0.85rem;
+  padding: 0.3rem 0.7rem;
+}
+
+.alloc-bar {
+  display: flex;
+  height: 0.9rem;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  margin-top: 0.9rem;
+  background: var(--surface);
+}
+
+.alloc-bar-segment { flex-shrink: 0; }
+.alloc-bar-remaining { flex-shrink: 0; background: repeating-linear-gradient(45deg, var(--surface), var(--surface) 4px, var(--border) 4px, var(--border) 8px); }
+
+.alloc-total {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.alloc-total.over { color: #991b1b; font-weight: 600; }
+
 button {
   background: var(--accent);
   color: white;

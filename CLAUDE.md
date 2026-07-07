@@ -124,6 +124,20 @@ to a new value), editable independently via the same `apply_allocation()` used f
 data. `apply_scenario()` overwrites live allocations with the scenario's; there's no
 merge/diff — it's all-or-nothing.
 
+The "New scenario" form (`scenarios.html`) picks a student and shows their current live
+allocation as a set of sliders (one per grant, plus an "add a grant" control), so you can
+free up percent from one grant while adding it to another in a single save — a stacked
+bar and running total make it visually obvious when you're over 100%. This posts
+`grant_id[]`/`percent[]` arrays to `add_scenario()`, which validates and writes them via
+`apply_allocation_batch()` — a *different* function from `apply_allocation()` (used by
+the single-grant "Allocate to a grant" forms on the grant/student pages, unchanged).
+The batch version validates the combined new state up front rather than one grant at a
+time, which is what makes rebalancing between two grants possible in one call: checking
+sequentially would reject "raise grant B" while grant A still holds the percent about to
+be freed up. Current allocations are embedded as JSON (`live_allocations_by_student`,
+grouped server-side in `scenarios_page()`) and read client-side by month — switching the
+"From month" re-derives which grants/percents count as "current" for that month.
+
 ## Conventions
 
 - Keep everything in `app.py` — don't split into blueprints/models unless the file
