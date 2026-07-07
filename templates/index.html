@@ -5,10 +5,14 @@
 <section>
   <h1>Grants</h1>
   <div class="toggle-bar">
-    <a href="{{ url_for('index') }}" class="toggle {{ 'active' if not category_filter }}">All</a>
-    <a href="{{ url_for('index', category='sponsored') }}" class="toggle {{ 'active' if category_filter == 'sponsored' }}">Sponsored</a>
-    <a href="{{ url_for('index', category='gift') }}" class="toggle {{ 'active' if category_filter == 'gift' }}">Gift</a>
-    <a href="{{ url_for('index', category='internal') }}" class="toggle {{ 'active' if category_filter == 'internal' }}">Internal</a>
+    <a href="{{ url_for('index', hide_closed=1 if hide_closed else None) }}" class="toggle {{ 'active' if not category_filter }}">All</a>
+    <a href="{{ url_for('index', category='sponsored', hide_closed=1 if hide_closed else None) }}" class="toggle {{ 'active' if category_filter == 'sponsored' }}">Sponsored</a>
+    <a href="{{ url_for('index', category='gift', hide_closed=1 if hide_closed else None) }}" class="toggle {{ 'active' if category_filter == 'gift' }}">Gift</a>
+    <a href="{{ url_for('index', category='internal', hide_closed=1 if hide_closed else None) }}" class="toggle {{ 'active' if category_filter == 'internal' }}">Internal</a>
+  </div>
+  <div class="toggle-bar">
+    <a href="{{ url_for('index', category=category_filter) }}" class="toggle {{ '' if hide_closed else 'active' }}">All statuses</a>
+    <a href="{{ url_for('index', category=category_filter, hide_closed=1) }}" class="toggle {{ 'active' if hide_closed else '' }}">Hide expired/overspent</a>
   </div>
   <table>
     <thead>
@@ -28,7 +32,7 @@
         <td>{% if grant.spending_risk %}<span class="badge badge-risk-{{ grant.spending_risk }}">{{ grant.spending_risk | capitalize }}</span>{% endif %}</td>
       </tr>
       {% else %}
-      <tr><td colspan="9" class="empty">No grants{{ " in this category" if category_filter else "" }}.</td></tr>
+      <tr><td colspan="9" class="empty">No grants{{ " match the current filters" if (category_filter or hide_closed) else " yet" }}.</td></tr>
       {% endfor %}
     </tbody>
   </table>

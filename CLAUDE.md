@@ -26,6 +26,14 @@ scenarios), ideally against `seed_demo.py` data.
   post directly to route handlers and redirect back (no JS framework, minimal
   hand-written JS inline in a couple of templates).
 - **`static/style.css`** — one shared stylesheet, plain CSS with custom properties.
+  Light/dark theming works by overriding those properties under
+  `:root[data-theme="dark"]`; the `data-theme` attribute is set by inline JS in
+  `base.html` (before first paint, from `localStorage` or `prefers-color-scheme`) and
+  flipped by the header's toggle button. New chrome-level colors (page/card
+  backgrounds) should go through a variable (`--bg`, `--surface`, etc.), not a literal
+  like `white`, or they'll stay wrong in dark mode. Badge/banner colors are
+  intentionally left as fixed pastels in both themes — that's a deliberate choice, not
+  an oversight.
 - **`data/*.db`** — one SQLite file per faculty member. Never shared across faculty;
   switching faculty in the UI just repoints the session at a different file. These
   files (except the two demo ones under version control via `seed_demo.py`) are
@@ -44,7 +52,10 @@ scenarios), ideally against `seed_demo.py` data.
   by sponsor, not department). `category` (`'sponsored'`, `'gift'`, or `'internal'`,
   validated by `parse_category()`/`GRANT_CATEGORIES`) drives the dashboard's toggle
   filter (`?category=` query param on `/`) — purely a classification, doesn't affect
-  cost math.
+  cost math. The dashboard also has an independent `?hide_closed=1` toggle that drops
+  expired grants and any with a negative `balance_cents` (spent beyond the awarded
+  total) from view; the two query params compose and each toggle's links preserve the
+  other's current value (see `index()` and `index.html`).
 - `departments` — per-department **default** billing rates: `stipend_cents_per_month`,
   `tuition_cents_per_month`, `fringe_rate_bps`. The stipend is a default only — see
   below.

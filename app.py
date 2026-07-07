@@ -493,6 +493,7 @@ def index():
     category_filter = request.args.get("category")
     if category_filter not in GRANT_CATEGORIES:
         category_filter = None
+    hide_closed = request.args.get("hide_closed") == "1"
 
     query = "SELECT * FROM grants"
     params = ()
@@ -502,6 +503,8 @@ def index():
     query += " ORDER BY end_date"
 
     grants = [grant_with_balance(r) for r in db.execute(query, params)]
+    if hide_closed:
+        grants = [g for g in grants if g["status"] != "expired" and g["balance_cents"] >= 0]
     for grant in grants:
         grid = grant_allocation_grid(grant["id"], None)
         grant["projected_personnel_cents"] = grid["total_cost"] if grid else 0
@@ -519,6 +522,7 @@ def index():
         departments=departments,
         today=date.today().isoformat(),
         category_filter=category_filter,
+        hide_closed=hide_closed,
     )
 
 
