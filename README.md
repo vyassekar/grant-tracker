@@ -3,11 +3,12 @@
 Local single-user webapp for tracking research grants, spending, and student
 allocations.
 
-**Demo video:** [demo/grant_tracker_demo.mp4](demo/grant_tracker_demo.mp4) — a ~35s
-walkthrough recorded against the seeded sample data (grant category filtering and
-over/underspending risk flags, a grant detail with a what-if scenario comparison,
-department stipend auto-fill, a student's multi-grant allocation grid, departments,
-scenarios, and switching faculty members).
+**Demo video:** [demo/grant_tracker_demo.mp4](demo/grant_tracker_demo.mp4) — a ~40s
+walkthrough recorded against the seeded sample data (dark/light theme toggle, grant
+category filtering, hiding expired/overspent grants, an overspending risk flag on a
+grant detail page, department stipend auto-fill, and building a what-if scenario across
+two students with the slider allocation editor to see their combined projected-cost
+effect).
 
 - Track grant balances (recorded transactions) and expiration status.
 - Allocate students to grants by month and percent of effort — a student can
@@ -71,10 +72,11 @@ python seed_demo.py
 
 This creates two demo faculty databases under `data/`:
 
-- **Dr. Maria Santos** — 4 grants (one expired, one expiring soon, two
-  active), 5 students split across 3 departments with overlapping and
-  partial allocations, recorded transactions, and one pre-built what-if
-  scenario.
+- **Dr. Maria Santos** — 6 grants spanning all three categories (sponsored,
+  gift, internal) and every status (expired, expiring soon, active, one
+  flagged overspending), 5 students/postdocs split across 3 departments
+  with overlapping and partial allocations, recorded transactions, and one
+  pre-built what-if scenario spanning multiple students.
 - **Dr. Alex Rivera** — a smaller second dataset, mainly to show that
   switching faculty members keeps data fully separate.
 

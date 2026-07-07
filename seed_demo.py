@@ -4,7 +4,8 @@ Run: ./venv/bin/python seed_demo.py
 
 Creates two faculty databases under data/ so you can explore the app (and the
 faculty-switching feature) immediately, without entering data by hand:
-  - Dr. Maria Santos: a fuller dataset (4 grants, 5 students, a what-if scenario)
+  - Dr. Maria Santos: a fuller dataset (grants across all three categories, 5 students,
+    a what-if scenario spanning multiple students)
   - Dr. Alex Rivera: a smaller second dataset, to show data stays separate per faculty
 
 Re-running this script replaces both databases from scratch.
@@ -134,10 +135,12 @@ def seed_maria_santos():
     insert_transaction(db, doe, "2025-06-01", 3_200, "Workshop materials")
     insert_transaction(db, sloan, "2026-02-14", 1_500, "Travel - S. Wilson (poster session)")
 
-    # A what-if scenario: what if Yuki's NIH effort went from 30% to 60%?
+    # A what-if scenario spanning two students: Yuki's NIH effort goes from 30% to 60%,
+    # and Okafor's July is rebalanced from 100% NIH to a 50/50 NIH/DOE split -- demos
+    # the scenario detail page's combined-effect view across multiple people at once.
     cur = db.execute(
         "INSERT INTO scenarios (name, created_at) VALUES (?, ?)",
-        ("What if: bump Yuki to 60% on NIH", "2026-07-01T09:00:00"),
+        ("What if: bump Yuki to 60% NIH, rebalance Okafor onto DOE", "2026-07-01T09:00:00"),
     )
     scenario_id = cur.lastrowid
     db.execute(
@@ -150,6 +153,12 @@ def seed_maria_santos():
         (scenario_id, tanaka, nih),
     )
     insert_allocation(db, scenario_id, tanaka, nih, "2026-01", "2026-07", 60)
+    db.execute(
+        "DELETE FROM allocations WHERE scenario_id = ? AND student_id = ? AND grant_id = ? AND month = ?",
+        (scenario_id, okafor, nih, "2026-07"),
+    )
+    insert_allocation(db, scenario_id, okafor, nih, "2026-07", "2026-07", 50)
+    insert_allocation(db, scenario_id, okafor, doe, "2026-07", "2026-07", 50)
 
     db.commit()
     db.close()

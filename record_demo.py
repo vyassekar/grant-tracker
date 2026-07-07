@@ -88,30 +88,53 @@ def option_value(page, select_selector, label_substring):
     )
 
 
+def set_alloc_row_percent(page, row_index, percent):
+    """Drag one of the allocation editor's sliders (see _allocation_editor.html) to a
+    value and let its own JS update the row, running total, and stacked bar."""
+    page.evaluate(
+        "([i, v]) => { setAllocPercent(i, v); document.querySelectorAll('.alloc-row input[type=range]')[i].value = v; }",
+        [row_index, percent],
+    )
+
+
 def run_walkthrough(page):
     page.set_viewport_size({"width": 1280, "height": 800})
 
     select_faculty(page, "Dr Maria Santos")
-    page.wait_for_timeout(2200)
+    page.wait_for_timeout(2000)
+
+    # Dark/light theme toggle in the header.
+    page.locator(".theme-toggle").click()
+    page.wait_for_timeout(1400)
+    page.locator(".theme-toggle").click()
+    page.wait_for_timeout(600)
 
     # Grant category toggle filter: All -> Internal -> Sponsored -> back to All. The
     # Internal view lands on a grant with a real overspending flag and one with an
     # underspending flag, visible in the table without leaving the dashboard.
     page.locator("a.toggle", has_text="Internal").click()
     page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(1800)
+    page.wait_for_timeout(1600)
     page.locator("a.toggle", has_text="Sponsored").click()
     page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(1400)
-    page.locator("a.toggle", has_text="All").click()
+    page.wait_for_timeout(1200)
+    page.get_by_role("link", name="All", exact=True).click()
     page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(1000)
+    page.wait_for_timeout(800)
+
+    # Hide-expired/overspent toggle: the expired DOE award drops out of view, then back.
+    page.locator("a.toggle", has_text="Hide expired/overspent").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1600)
+    page.get_by_role("link", name="All statuses", exact=True).click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(800)
 
     # Drill into the grant with the overspending flag to see the risk badge and
     # explanation alongside its category badge on the detail page.
     page.get_by_role("link", name="Summer TA Support").click()
     page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(2400)
+    page.wait_for_timeout(2200)
 
     page.locator("a.back").click()
     page.wait_for_load_state("networkidle")
@@ -120,7 +143,7 @@ def run_walkthrough(page):
     # Departments: default stipend column, alongside tuition/fringe.
     page.get_by_role("link", name="Departments").click()
     page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(2000)
+    page.wait_for_timeout(1800)
 
     page.locator("a.back").click()
     page.wait_for_load_state("networkidle")
@@ -136,39 +159,46 @@ def run_walkthrough(page):
     page.wait_for_timeout(400)
     dept_value = option_value(page, f"{add_student_form} select[name='department_id']", "Mechanical Engineering")
     set_field(page, f"{add_student_form} select[name='department_id']", dept_value)
-    page.wait_for_timeout(2200)
+    page.wait_for_timeout(1800)
 
-    page.get_by_role("link", name="NIH R01 - Cancer Genomics").click()
-    page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(2200)
-
-    # Create a new what-if scenario right from the Scenarios page: pick a student,
-    # a grant, a month range, and a percent -- this is the fixed flow.
+    # Scenarios: build a new what-if from scratch using the slider allocation editor.
     page.get_by_role("link", name="Scenarios").click()
     page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(1200)
+    page.wait_for_timeout(1000)
 
     page.locator("details summary", has_text="New scenario").click()
     page.wait_for_timeout(500)
 
-    form = 'form[action*="scenarios/add"]'
-    set_field(page, f"{form} input[name='name']", "Give Yuki more time on Sloan")
-    student_value = option_value(page, f"{form} select[name='student_id']", "Yuki")
-    set_field(page, f"{form} select[name='student_id']", student_value)
-    grant_value = option_value(page, f"{form} select[name='grant_id']", "Sloan")
-    set_field(page, f"{form} select[name='grant_id']", grant_value)
-    set_field(page, f"{form} input[name='month_start']", "2026-08")
-    set_field(page, f"{form} input[name='month_end']", "2026-12")
-    set_field(page, f"{form} input[name='percent']", "50")
-    page.wait_for_timeout(800)
-    page.locator(f"{form} button[type=submit]").click()
+    create_form = 'form[action*="scenarios/add"]'
+    page.fill(f"{create_form} input[name='name']", "Give Yuki more time on Sloan")
+    page.select_option("#scenario-student", label="Yuki Tanaka")
+    page.wait_for_timeout(300)
+    set_field(page, "#scenario-month-start", "2026-08")
+    set_field(page, f"{create_form} input[name='month_end']", "2026-12")
+    page.wait_for_timeout(500)
+    page.select_option("#alloc-add-grant", label="Sloan Research Fellowship")
+    page.click('button:has-text("+ Add grant")')
+    page.wait_for_timeout(300)
+    set_alloc_row_percent(page, 0, 50)
+    page.wait_for_timeout(1200)
+    page.locator(f"{create_form} button[type=submit]").click()
     page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(2500)
+    page.wait_for_timeout(1800)
 
-    # Jump to the affected grant to see the live-vs-scenario cost comparison.
-    page.get_by_role("link", name="Sloan Research Fellowship").click()
+    # Add a second student's change to the *same* scenario from its own detail page --
+    # rebalancing Okafor's July effort between NIH and DOE -- to show the combined
+    # multi-student effect, not just a single change.
+    page.select_option("#scenario-student", label="David Okafor")
+    page.wait_for_timeout(400)
+    page.select_option("#alloc-add-grant", label="DOE Early Career Award")
+    page.click('button:has-text("+ Add grant")')
+    page.wait_for_timeout(300)
+    set_alloc_row_percent(page, 0, 50)
+    set_alloc_row_percent(page, 1, 50)
+    page.wait_for_timeout(1200)
+    page.locator('form[action*="allocations/add"] button[type=submit]').click()
     page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(2800)
+    page.wait_for_timeout(3000)
 
     select_faculty(page, "Dr Alex Rivera")
     page.wait_for_timeout(2000)
