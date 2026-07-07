@@ -134,9 +134,27 @@ the single-grant "Allocate to a grant" forms on the grant/student pages, unchang
 The batch version validates the combined new state up front rather than one grant at a
 time, which is what makes rebalancing between two grants possible in one call: checking
 sequentially would reject "raise grant B" while grant A still holds the percent about to
-be freed up. Current allocations are embedded as JSON (`live_allocations_by_student`,
-grouped server-side in `scenarios_page()`) and read client-side by month — switching the
-"From month" re-derives which grants/percents count as "current" for that month.
+be freed up.
+
+The slider editor itself lives in `templates/_allocation_editor.html`, included (not
+extended — it's meant to sit inside a `<form>` the parent page already opened) by both
+`scenarios.html` and `scenario_detail.html`. It expects `students`, `grants_json`
+(`[{id, name}, ...]`), `today`, and `baseline_allocations_by_student` (grouped by
+`allocations_grouped_by_student()`) in the including template's context — the only
+difference between the two call sites is *which* allocations count as "current": live
+data on the creation form, that scenario's own data on `scenario_detail.html`'s "Add a
+change" form, so edits build on whatever a multi-student scenario already contains
+rather than always resetting to live.
+
+`scenario_detail.html` (`GET /scenarios/<id>`) is where a scenario spanning several
+students comes together: it lists every student and grant touched in either live or the
+scenario (via set union, so removals show up too), a "Changed" badge from
+`scenario_changed_student_ids()` (a symmetric-difference of the two universes' allocation
+rows) marks who's actually been edited, and the overall "Projected personnel" stat sums
+every grant's scenario-vs-live cost — the combined effect of however many students'
+changes have been layered in. `add_scenario()` redirects here after creating a scenario
+(instead of straight to the student page) so building out a multi-student scenario is a
+loop over this one page: pick a student in "Add a change," adjust, save, repeat.
 
 ## Conventions
 

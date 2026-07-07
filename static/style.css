@@ -125,6 +125,8 @@ a { color: var(--accent); }
 .badge-risk-overspending { background: #fee2e2; color: #991b1b; }
 .badge-risk-underspending { background: #fef3c7; color: #92400e; }
 
+.badge-changed { background: #dbeafe; color: #1e40af; margin-left: 0.4rem; }
+
 .toggle-bar { display: flex; gap: 0.4rem; margin-bottom: 0.75rem; }
 
 .toggle {

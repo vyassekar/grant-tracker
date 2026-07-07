@@ -8,8 +8,8 @@
   <h1>What-if scenarios</h1>
   <p class="hint">
     A scenario is a copy of your live allocations that you can freely move around without affecting real data.
-    Set the first change below when you create it, then make further changes any time by opening a grant or
-    student page and using the "Viewing" dropdown to switch into the scenario.
+    Set the first change below when you create it, then open the scenario to add changes for more students and
+    see the combined effect across all of them in one place.
   </p>
 
   <table>
@@ -17,7 +17,7 @@
     <tbody>
       {% for s in scenarios %}
       <tr>
-        <td>{{ s.name }}</td>
+        <td><a href="{{ url_for('scenario_detail', scenario_id=s.id) }}">{{ s.name }}</a></td>
         <td>{{ s.created_at }}</td>
         <td>
           <form method="post" action="{{ url_for('apply_scenario', scenario_id=s.id) }}" class="inline-form"
@@ -41,27 +41,14 @@
     <form method="post" action="{{ url_for('add_scenario') }}" class="form-grid">
       <label>Name <input name="name" placeholder="e.g. Move Alex to NIH grant" required></label>
       {% if students and grants %}
-      <label>Student
-        <select id="scenario-student" name="student_id" onchange="renderAllocEditor()">
-          <option value="">(no change yet)</option>
-          {% for student in students %}
-          <option value="{{ student.id }}">{{ student.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>From month <input id="scenario-month-start" name="month_start" type="month" value="{{ today[:7] }}" onchange="renderAllocEditor()"></label>
-      <label>To month <input name="month_end" type="month" value="{{ today[:7] }}"></label>
-
-      <div class="alloc-editor" id="alloc-editor">
-        <p class="hint">Pick a student above to see and adjust their current allocation.</p>
-      </div>
-
+      {% include "_allocation_editor.html" %}
       <button type="submit">Create scenario</button>
     </form>
     <p class="hint">
       Leave Student blank to just start from a plain copy of live data. Otherwise the sliders above set that
       student's allocation to each grant, for the chosen months, right in the new scenario -- including any
       grants they're already on, so you can free up percent from one while adding it to another in one save.
+      Add changes for more students after creating it, from the scenario's own page.
     </p>
     {% else %}
       <button type="submit">Create scenario</button>
@@ -69,108 +56,5 @@
     <p class="hint">Add at least one student and one grant first to set an allocation change here.</p>
     {% endif %}
 </section>
-
-{% if students and grants %}
-<script>
-  const liveAllocByStudent = {{ live_allocations_by_student | tojson }};
-  const allGrants = {{ grants_json | tojson }};
-  const segmentColors = ["#2563eb", "#7c3aed", "#059669", "#d97706", "#db2777", "#0891b2"];
-  let allocRows = [];
-
-  function escapeHtml(text) {
-    const div = document.createElement("div");
-    div.textContent = text;
-    return div.innerHTML;
-  }
-
-  function renderAllocEditor() {
-    const studentId = document.getElementById("scenario-student").value;
-    const refMonth = document.getElementById("scenario-month-start").value;
-    const editor = document.getElementById("alloc-editor");
-    if (!studentId) {
-      allocRows = [];
-      editor.innerHTML = '<p class="hint">Pick a student above to see and adjust their current allocation.</p>';
-      return;
-    }
-    const current = (liveAllocByStudent[studentId] || []).filter(a => a.month === refMonth);
-    allocRows = current.map(a => ({ grantId: a.grant_id, grantName: a.grant_name, percent: a.percent }));
-    editor.innerHTML =
-      '<div class="alloc-rows" id="alloc-rows"></div>' +
-      '<div class="alloc-add">' +
-      '<select id="alloc-add-grant"></select>' +
-      '<button type="button" onclick="addAllocRow()">+ Add grant</button>' +
-      "</div>" +
-      '<div class="alloc-bar" id="alloc-bar"></div>' +
-      '<div class="alloc-total" id="alloc-total"></div>';
-    renderRows();
-  }
-
-  function addAllocRow() {
-    const select = document.getElementById("alloc-add-grant");
-    const grantId = parseInt(select.value, 10);
-    if (!grantId || allocRows.some(r => r.grantId === grantId)) return;
-    const grant = allGrants.find(g => g.id === grantId);
-    allocRows.push({ grantId: grant.id, grantName: grant.name, percent: 0 });
-    renderRows();
-  }
-
-  function removeAllocRow(index) {
-    allocRows.splice(index, 1);
-    renderRows();
-  }
-
-  function setAllocPercent(index, value) {
-    allocRows[index].percent = Math.max(0, Math.min(100, parseInt(value, 10) || 0));
-    updateAllocSummary();
-    const readout = document.getElementById("alloc-readout-" + index);
-    if (readout) readout.textContent = allocRows[index].percent + "%";
-  }
-
-  function renderRows() {
-    const rowsEl = document.getElementById("alloc-rows");
-    rowsEl.innerHTML = allocRows
-      .map((row, i) => {
-        const color = segmentColors[i % segmentColors.length];
-        return (
-          '<div class="alloc-row">' +
-          '<span class="alloc-swatch" style="background:' + color + '"></span>' +
-          '<span class="alloc-row-name">' + escapeHtml(row.grantName) + "</span>" +
-          '<input type="hidden" name="grant_id[]" value="' + row.grantId + '">' +
-          '<input type="range" name="percent[]" min="0" max="100" step="5" value="' + row.percent +
-          '" oninput="setAllocPercent(' + i + ', this.value)">' +
-          '<span class="alloc-row-readout" id="alloc-readout-' + i + '">' + row.percent + "%</span>" +
-          '<button type="button" class="alloc-row-remove" onclick="removeAllocRow(' + i + ')" title="Remove">&times;</button>' +
-          "</div>"
-        );
-      })
-      .join("");
-
-    const addSelect = document.getElementById("alloc-add-grant");
-    const available = allGrants.filter(g => !allocRows.some(r => r.grantId === g.id));
-    addSelect.innerHTML =
-      '<option value="">' + (available.length ? "Add a grant..." : "(all grants added)") + "</option>" +
-      available.map(g => '<option value="' + g.id + '">' + escapeHtml(g.name) + "</option>").join("");
-
-    updateAllocSummary();
-  }
-
-  function updateAllocSummary() {
-    const total = allocRows.reduce((sum, r) => sum + r.percent, 0);
-    const bar = document.getElementById("alloc-bar");
-    const segments = allocRows
-      .map((row, i) => '<div class="alloc-bar-segment" style="flex-basis:' + row.percent + '%;background:' + segmentColors[i % segmentColors.length] + '"></div>')
-      .join("");
-    const remaining = total < 100 ? '<div class="alloc-bar-remaining" style="flex-basis:' + (100 - total) + '%"></div>' : "";
-    bar.innerHTML = segments + remaining;
-
-    const totalEl = document.getElementById("alloc-total");
-    totalEl.textContent = "Total: " + total + "%" + (total > 100 ? " (over by " + (total - 100) + "%)" : "");
-    totalEl.className = "alloc-total" + (total > 100 ? " over" : "");
-
-    const submitButton = document.querySelector('form[action*="scenarios/add"] button[type=submit]');
-    if (submitButton) submitButton.disabled = total > 100;
-  }
-</script>
-{% endif %}
 
 {% endblock %}

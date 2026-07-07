@@ -965,6 +965,46 @@ def apply_allocation_batch(db, scenario_id, student_id, grant_percent_pairs, mon
     return None
 
 
+def allocations_grouped_by_student(db, scenario_id):
+    """{student_id: [{grant_id, grant_name, month, percent}, ...]} for one universe
+    (scenario_id=None means live). Used to seed the slider editor's starting point --
+    live data on the "New scenario" form, that scenario's own data on its "add a change"
+    form, so edits build on whatever's already there rather than always on live.
+    """
+    clause, params = scenario_clause(scenario_id)
+    rows = db.execute(
+        f"""SELECT allocations.student_id, allocations.grant_id, grants.name AS grant_name,
+                   allocations.month, allocations.percent
+            FROM allocations JOIN grants ON grants.id = allocations.grant_id
+            WHERE {clause}""",
+        params,
+    ).fetchall()
+    by_student = {}
+    for row in rows:
+        by_student.setdefault(row["student_id"], []).append(
+            {"grant_id": row["grant_id"], "grant_name": row["grant_name"], "month": row["month"], "percent": row["percent"]}
+        )
+    return by_student
+
+
+def scenario_changed_student_ids(db, scenario_id):
+    """Student ids whose allocation in this scenario differs from live -- added, removed,
+    or a changed percent for some grant/month. Used to badge who's actually been touched
+    when a scenario spans multiple students.
+    """
+    live_rows = {
+        (r["student_id"], r["grant_id"], r["month"], r["percent"])
+        for r in db.execute("SELECT student_id, grant_id, month, percent FROM allocations WHERE scenario_id IS NULL")
+    }
+    scenario_rows = {
+        (r["student_id"], r["grant_id"], r["month"], r["percent"])
+        for r in db.execute(
+            "SELECT student_id, grant_id, month, percent FROM allocations WHERE scenario_id = ?", (scenario_id,)
+        )
+    }
+    return {row[0] for row in live_rows.symmetric_difference(scenario_rows)}
+
+
 @app.route("/allocations/set", methods=["POST"])
 def set_allocation():
     db = get_db()
@@ -1065,18 +1105,6 @@ def scenarios_page():
     scenarios = db.execute("SELECT * FROM scenarios ORDER BY created_at DESC").fetchall()
     students = db.execute("SELECT * FROM students ORDER BY name").fetchall()
     grants = db.execute("SELECT * FROM grants ORDER BY name").fetchall()
-
-    live_allocations_by_student = {}
-    live_rows = db.execute(
-        """SELECT allocations.student_id, allocations.grant_id, grants.name AS grant_name,
-                  allocations.month, allocations.percent
-           FROM allocations JOIN grants ON grants.id = allocations.grant_id
-           WHERE allocations.scenario_id IS NULL"""
-    ).fetchall()
-    for row in live_rows:
-        live_allocations_by_student.setdefault(row["student_id"], []).append(
-            {"grant_id": row["grant_id"], "grant_name": row["grant_name"], "month": row["month"], "percent": row["percent"]}
-        )
     grants_json = [{"id": g["id"], "name": g["name"]} for g in grants]
 
     return render_template(
@@ -1086,7 +1114,7 @@ def scenarios_page():
         grants=grants,
         grants_json=grants_json,
         today=date.today().isoformat(),
-        live_allocations_by_student=live_allocations_by_student,
+        baseline_allocations_by_student=allocations_grouped_by_student(db, None),
     )
 
 
@@ -1126,11 +1154,105 @@ def add_scenario():
             db.rollback()
             flash(error)
             return redirect(url_for("scenarios_page"))
-        db.commit()
-        return redirect(url_for("student_detail", student_id=student_id, scenario=scenario_id))
 
     db.commit()
-    return redirect(url_for("scenarios_page"))
+    return redirect(url_for("scenario_detail", scenario_id=scenario_id))
+
+
+@app.route("/scenarios/<int:scenario_id>")
+def scenario_detail(scenario_id):
+    db = get_db()
+    scenario = db.execute("SELECT * FROM scenarios WHERE id = ?", (scenario_id,)).fetchone()
+    if scenario is None:
+        return redirect(url_for("scenarios_page"))
+
+    live_student_ids = {r["student_id"] for r in db.execute("SELECT DISTINCT student_id FROM allocations WHERE scenario_id IS NULL")}
+    scenario_student_ids = {
+        r["student_id"] for r in db.execute("SELECT DISTINCT student_id FROM allocations WHERE scenario_id = ?", (scenario_id,))
+    }
+    changed_student_ids = scenario_changed_student_ids(db, scenario_id)
+
+    student_rows = []
+    for student_id in live_student_ids | scenario_student_ids:
+        student = db.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
+        if student is None:
+            continue
+        live_grid = student_allocation_grid(student_id, None)
+        scenario_grid = student_allocation_grid(student_id, scenario_id)
+        student_rows.append(
+            {
+                "id": student_id,
+                "name": student["name"],
+                "changed": student_id in changed_student_ids,
+                "live_cost_cents": live_grid["breakdown"]["total"] if live_grid else 0,
+                "scenario_cost_cents": scenario_grid["breakdown"]["total"] if scenario_grid else 0,
+            }
+        )
+    student_rows.sort(key=lambda r: r["name"])
+
+    live_grant_ids = {r["grant_id"] for r in db.execute("SELECT DISTINCT grant_id FROM allocations WHERE scenario_id IS NULL")}
+    scenario_grant_ids = {
+        r["grant_id"] for r in db.execute("SELECT DISTINCT grant_id FROM allocations WHERE scenario_id = ?", (scenario_id,))
+    }
+    grant_rows = []
+    for grant_id in live_grant_ids | scenario_grant_ids:
+        grant = db.execute("SELECT * FROM grants WHERE id = ?", (grant_id,)).fetchone()
+        if grant is None:
+            continue
+        live_grid = grant_allocation_grid(grant_id, None)
+        scenario_grid = grant_allocation_grid(grant_id, scenario_id)
+        grant_rows.append(
+            {
+                "id": grant_id,
+                "name": grant["name"],
+                "live_cost_cents": live_grid["total_cost"] if live_grid else 0,
+                "scenario_cost_cents": scenario_grid["total_cost"] if scenario_grid else 0,
+            }
+        )
+    grant_rows.sort(key=lambda r: r["name"])
+
+    students = db.execute("SELECT * FROM students ORDER BY name").fetchall()
+    grants = db.execute("SELECT * FROM grants ORDER BY name").fetchall()
+    grants_json = [{"id": g["id"], "name": g["name"]} for g in grants]
+
+    return render_template(
+        "scenario_detail.html",
+        scenario=scenario,
+        student_rows=student_rows,
+        grant_rows=grant_rows,
+        total_live_cents=sum(r["live_cost_cents"] for r in grant_rows),
+        total_scenario_cents=sum(r["scenario_cost_cents"] for r in grant_rows),
+        students=students,
+        grants=grants,
+        grants_json=grants_json,
+        today=date.today().isoformat(),
+        baseline_allocations_by_student=allocations_grouped_by_student(db, scenario_id),
+    )
+
+
+@app.route("/scenarios/<int:scenario_id>/allocations/add", methods=["POST"])
+def add_scenario_allocation(scenario_id):
+    db = get_db()
+    scenario = db.execute("SELECT id FROM scenarios WHERE id = ?", (scenario_id,)).fetchone()
+    if scenario is None:
+        return redirect(url_for("scenarios_page"))
+
+    student_id = request.form.get("student_id", "")
+    grant_ids = request.form.getlist("grant_id[]")
+    percents = request.form.getlist("percent[]")
+    rows = [(g, p) for g, p in zip(grant_ids, percents) if g]
+    if not student_id or not rows:
+        flash("Select a student and at least one grant.")
+        return redirect(url_for("scenario_detail", scenario_id=scenario_id))
+
+    error = apply_allocation_batch(
+        db, scenario_id, student_id, rows, request.form.get("month_start", ""), request.form.get("month_end", "")
+    )
+    if error:
+        flash(error)
+        return redirect(url_for("scenario_detail", scenario_id=scenario_id))
+    db.commit()
+    return redirect(url_for("scenario_detail", scenario_id=scenario_id))
 
 
 @app.route("/scenarios/<int:scenario_id>/apply", methods=["POST"])

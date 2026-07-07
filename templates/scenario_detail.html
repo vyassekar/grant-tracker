@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ scenario.name }} – Grant Tracker{% endblock %}
+{% block content %}
+
+<a href="{{ url_for('scenarios_page') }}" class="back">&larr; Scenarios</a>
+
+<section>
+  <h1>{{ scenario.name }}</h1>
+  <p class="meta">Created {{ scenario.created_at }}</p>
+
+  <div class="stats">
+    <div><span class="stat-label">Projected personnel (live)</span><span class="stat-value">${{ total_live_cents | money }}</span></div>
+    <div><span class="stat-label">Projected personnel (this scenario)</span><span class="stat-value">${{ total_scenario_cents | money }}</span></div>
+    <div><span class="stat-label">Difference</span><span class="stat-value">${{ (total_scenario_cents - total_live_cents) | money }}</span></div>
+  </div>
+
+  <p class="hint">Combined effect across every student touched in this scenario, compared to live data.</p>
+
+  <form method="post" action="{{ url_for('apply_scenario', scenario_id=scenario.id) }}" class="inline-form"
+        onsubmit="return confirm('Apply this scenario to live data? This replaces all current live allocations.');">
+    <button type="submit">Apply to live</button>
+  </form>
+  <form method="post" action="{{ url_for('delete_scenario', scenario_id=scenario.id) }}" class="inline-form"
+        onsubmit="return confirm('Delete this scenario?');">
+    <button type="submit" class="danger">Delete scenario</button>
+  </form>
+</section>
+
+<section>
+  <h2>Students in this scenario</h2>
+  <table>
+    <thead><tr><th>Name</th><th>Projected cost (live)</th><th>Projected cost (scenario)</th><th>Difference</th></tr></thead>
+    <tbody>
+      {% for row in student_rows %}
+      <tr>
+        <td>
+          <a href="{{ url_for('student_detail', student_id=row.id, scenario=scenario.id) }}">{{ row.name }}</a>
+          {% if row.changed %}<span class="badge badge-changed">Changed</span>{% endif %}
+        </td>
+        <td>${{ row.live_cost_cents | money }}</td>
+        <td>${{ row.scenario_cost_cents | money }}</td>
+        <td>${{ (row.scenario_cost_cents - row.live_cost_cents) | money }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="empty">No students allocated in this scenario yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Grants in this scenario</h2>
+  <table>
+    <thead><tr><th>Name</th><th>Projected cost (live)</th><th>Projected cost (scenario)</th><th>Difference</th></tr></thead>
+    <tbody>
+      {% for row in grant_rows %}
+      <tr>
+        <td><a href="{{ url_for('grant_detail', grant_id=row.id, scenario=scenario.id) }}">{{ row.name }}</a></td>
+        <td>${{ row.live_cost_cents | money }}</td>
+        <td>${{ row.scenario_cost_cents | money }}</td>
+        <td>${{ (row.scenario_cost_cents - row.live_cost_cents) | money }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="empty">No grants allocated in this scenario yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Add a change</h2>
+  {% if students and grants %}
+  <form method="post" action="{{ url_for('add_scenario_allocation', scenario_id=scenario.id) }}" class="form-grid">
+    {% include "_allocation_editor.html" %}
+    <button type="submit">Save change</button>
+  </form>
+  <p class="hint">
+    Picking a student shows their allocation within this scenario (not live) so you can keep adjusting it, or
+    pick a different student to add them to the scenario too -- build up as many changes as you need, across
+    as many students as you need, and the totals above reflect all of them together.
+  </p>
+  {% else %}
+  <p class="hint">Add at least one student and one grant first.</p>
+  {% endif %}
+</section>
+
+{% endblock %}
