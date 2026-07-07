@@ -14,14 +14,18 @@ departments, scenarios, and switching faculty members).
 - View allocation by grant (which students, what %, over time) or by student
   (which grants, what %, over time), each as a month-by-month grid.
 - Each student has a monthly stipend and an optional department. Departments
-  carry a tuition remission rate ($/month) and a fringe benefit rate (% of
-  stipend); each grant carries its own overhead/F&A rate. Grant and student
-  pages show a projected personnel cost breakdown (stipend / tuition / fringe
-  / overhead) per month, alongside the recorded transaction balance. Overhead
-  is computed on stipend+fringe only (tuition is excluded from the overhead
-  base, matching typical federal MTDC rules) — adjust the formula in
-  `allocation_cost_cents()` in `app.py` if your institution's accounting
-  differs.
+  carry a default stipend, a tuition remission rate ($/month), and a fringe
+  benefit rate (% of stipend); each grant carries its own overhead/F&A rate.
+  Picking a department on a student auto-fills its default stipend, but the
+  amount is still editable per student. Grant and student pages show a
+  projected personnel cost breakdown (stipend / tuition / fringe / overhead)
+  per month, alongside the recorded transaction balance. Overhead is computed
+  on stipend+fringe only (tuition is excluded from the overhead base, matching
+  typical federal MTDC rules) — adjust the formula in `allocation_cost_cents()`
+  in `app.py` if your institution's accounting differs.
+- A student can have an expected graduation date. No personnel cost is
+  projected for allocation months after that date (their allocation % still
+  shows, shaded, so the record isn't silently dropped — just not charged).
 - "What-if" scenarios: clone live allocations into a named scenario, move
   students around freely without touching real data, compare projected cost
   against live, and apply the scenario to live data when you're happy with it.

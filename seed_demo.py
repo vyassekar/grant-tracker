@@ -24,10 +24,10 @@ def fresh_db(slug):
     return db, path
 
 
-def insert_department(db, name, tuition_dollars, fringe_rate_percent):
+def insert_department(db, name, stipend_dollars, tuition_dollars, fringe_rate_percent):
     cur = db.execute(
-        "INSERT INTO departments (name, tuition_cents_per_month, fringe_rate_bps) VALUES (?, ?, ?)",
-        (name, round(tuition_dollars * 100), round(fringe_rate_percent * 100)),
+        "INSERT INTO departments (name, stipend_cents_per_month, tuition_cents_per_month, fringe_rate_bps) VALUES (?, ?, ?, ?)",
+        (name, round(stipend_dollars * 100), round(tuition_dollars * 100), round(fringe_rate_percent * 100)),
     )
     return cur.lastrowid
 
@@ -41,10 +41,11 @@ def insert_grant(db, name, sponsor, total_dollars, overhead_rate_percent, start_
     return cur.lastrowid
 
 
-def insert_student(db, name, email, department_id, stipend_dollars, notes=""):
+def insert_student(db, name, email, department_id, stipend_dollars, expected_graduation=None, notes=""):
     cur = db.execute(
-        "INSERT INTO students (name, email, department_id, stipend_cents_per_month, notes) VALUES (?, ?, ?, ?, ?)",
-        (name, email, department_id, round(stipend_dollars * 100), notes),
+        """INSERT INTO students (name, email, department_id, stipend_cents_per_month, expected_graduation, notes)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (name, email, department_id, round(stipend_dollars * 100), expected_graduation, notes),
     )
     return cur.lastrowid
 
@@ -82,9 +83,9 @@ def insert_allocation(db, scenario_id, student_id, grant_id, start_month, end_mo
 def seed_maria_santos():
     db, path = fresh_db(slugify("Dr. Maria Santos"))
 
-    cs = insert_department(db, "Computer Science", tuition_dollars=1200, fringe_rate_percent=28)
-    bio = insert_department(db, "Biology", tuition_dollars=1100, fringe_rate_percent=32)
-    me = insert_department(db, "Mechanical Engineering", tuition_dollars=1300, fringe_rate_percent=30)
+    cs = insert_department(db, "Computer Science", stipend_dollars=3700, tuition_dollars=1200, fringe_rate_percent=28)
+    bio = insert_department(db, "Biology", stipend_dollars=3400, tuition_dollars=1100, fringe_rate_percent=32)
+    me = insert_department(db, "Mechanical Engineering", stipend_dollars=3900, tuition_dollars=1300, fringe_rate_percent=30)
 
     nsf = insert_grant(db, "NSF CAREER Award", "NSF", 500_000, 52, "2024-09-01", "2027-08-31")
     nih = insert_grant(db, "NIH R01 - Cancer Genomics", "NIH", 750_000, 61, "2023-04-01", "2026-08-15")
@@ -95,7 +96,9 @@ def seed_maria_santos():
     okafor = insert_student(db, "David Okafor", "dokafor@university.edu", cs, 3600)
     nair = insert_student(db, "Priya Nair", "pnair@university.edu", bio, 3400)
     wilson = insert_student(db, "Sam Wilson", "swilson@university.edu", me, 3900)
-    tanaka = insert_student(db, "Yuki Tanaka", "ytanaka@university.edu", bio, 3300)
+    # Graduating mid-scenario, to demo that no personnel cost is projected past this date
+    # even though her NIH/scenario allocations continue through 2026-07.
+    tanaka = insert_student(db, "Yuki Tanaka", "ytanaka@university.edu", bio, 3300, expected_graduation="2026-05-31")
 
     insert_allocation(db, None, chen, nsf, "2026-01", "2026-12", 100)
     insert_allocation(db, None, okafor, nih, "2026-01", "2026-03", 60)
@@ -138,7 +141,7 @@ def seed_maria_santos():
 def seed_alex_rivera():
     db, path = fresh_db(slugify("Dr. Alex Rivera"))
 
-    physics = insert_department(db, "Physics", tuition_dollars=1150, fringe_rate_percent=29)
+    physics = insert_department(db, "Physics", stipend_dollars=3600, tuition_dollars=1150, fringe_rate_percent=29)
 
     nsf_physics = insert_grant(db, "NSF Physics Frontiers", "NSF", 300_000, 48, "2025-06-01", "2028-05-31")
     templeton = insert_grant(db, "Templeton Foundation Grant", "John Templeton Foundation", 120_000, 10, "2024-01-01", "2026-06-30")

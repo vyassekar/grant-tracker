@@ -51,6 +51,23 @@ def init_db(path):
         db.close()
 
 
+def migrate_db(db):
+    """Add columns introduced after a database file was first created.
+
+    schema.sql only runs for brand-new files (see init_db), so existing
+    per-faculty .db files need these added on the fly. Each ALTER is
+    idempotent (checked against the live column list) so this is safe to run
+    on every connection.
+    """
+    department_cols = {row["name"] for row in db.execute("PRAGMA table_info(departments)")}
+    if "stipend_cents_per_month" not in department_cols:
+        db.execute("ALTER TABLE departments ADD COLUMN stipend_cents_per_month INTEGER NOT NULL DEFAULT 0")
+    student_cols = {row["name"] for row in db.execute("PRAGMA table_info(students)")}
+    if "expected_graduation" not in student_cols:
+        db.execute("ALTER TABLE students ADD COLUMN expected_graduation TEXT")
+    db.commit()
+
+
 @app.before_request
 def require_faculty():
     if request.endpoint in NO_FACULTY_REQUIRED_ENDPOINTS:
@@ -66,6 +83,7 @@ def get_db():
         g.db = sqlite3.connect(faculty_db_path(session["faculty_db"]))
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
+        migrate_db(g.db)
     return g.db
 
 
@@ -103,6 +121,18 @@ def parse_date(raw):
         return date.fromisoformat(raw.strip())
     except (ValueError, AttributeError):
         return None
+
+
+def parse_optional_date(raw):
+    """Like parse_date, but a blank/missing value is valid and means 'not set'.
+
+    Returns (date_or_None, ok) -- ok is False only when raw is non-blank but not a valid date.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None, True
+    parsed = parse_date(raw)
+    return parsed, parsed is not None
 
 
 def parse_month(raw):
@@ -151,6 +181,18 @@ def grant_status(end_date_str):
     if days_left <= EXPIRING_SOON_DAYS:
         return "expiring-soon"
     return "active"
+
+
+def is_chargeable(month_str, expected_graduation_str):
+    """False if `month_str` (YYYY-MM) starts after the student's expected graduation date.
+
+    A student isn't charged to any grant for months entirely after they're expected to
+    graduate. The month graduation falls in is still charged in full, since allocations
+    are tracked at monthly granularity.
+    """
+    if not expected_graduation_str:
+        return True
+    return parse_month(month_str) <= date.fromisoformat(expected_graduation_str)
 
 
 def allocation_cost_cents(stipend_cents_per_month, tuition_cents_per_month, fringe_rate_bps, overhead_rate_bps, percent):
@@ -205,6 +247,7 @@ def grant_allocation_grid(grant_id, scenario_id):
     rows = db.execute(
         f"""SELECT allocations.month, allocations.percent, students.id AS student_id,
                    students.name AS student_name, students.stipend_cents_per_month,
+                   students.expected_graduation,
                    COALESCE(departments.tuition_cents_per_month, 0) AS tuition_cents_per_month,
                    COALESCE(departments.fringe_rate_bps, 0) AS fringe_rate_bps
             FROM allocations
@@ -222,20 +265,31 @@ def grant_allocation_grid(grant_id, scenario_id):
 
     by_student = {}
     for r in rows:
-        entry = by_student.setdefault(r["student_id"], {"name": r["student_name"], "percents": {}})
+        entry = by_student.setdefault(
+            r["student_id"], {"name": r["student_name"], "expected_graduation": r["expected_graduation"], "percents": {}}
+        )
         entry["percents"][r["month"]] = r["percent"]
 
     student_rows = [
-        {"name": data["name"], "cells": [data["percents"].get(m) for m in months]}
+        {
+            "name": data["name"],
+            "cells": [
+                {"percent": data["percents"].get(m), "chargeable": is_chargeable(m, data["expected_graduation"])}
+                for m in months
+            ],
+        }
         for _, data in sorted(by_student.items(), key=lambda kv: kv[1]["name"])
     ]
 
     cost_by_month = {m: empty_cost_breakdown() for m in months}
     total_breakdown = empty_cost_breakdown()
     for r in rows:
-        cost = allocation_cost_cents(
-            r["stipend_cents_per_month"], r["tuition_cents_per_month"], r["fringe_rate_bps"], overhead_rate_bps, r["percent"]
-        )
+        if is_chargeable(r["month"], r["expected_graduation"]):
+            cost = allocation_cost_cents(
+                r["stipend_cents_per_month"], r["tuition_cents_per_month"], r["fringe_rate_bps"], overhead_rate_bps, r["percent"]
+            )
+        else:
+            cost = empty_cost_breakdown()
         add_cost_breakdown(cost_by_month[r["month"]], cost)
         add_cost_breakdown(total_breakdown, cost)
     monthly_costs = [cost_by_month[m]["total"] for m in months]
@@ -254,7 +308,7 @@ def student_allocation_grid(student_id, scenario_id):
     """Grants x months grid of % allocation for this student, plus a per-month total (should stay <=100)."""
     db = get_db()
     student_row = db.execute(
-        """SELECT students.stipend_cents_per_month,
+        """SELECT students.stipend_cents_per_month, students.expected_graduation,
                   COALESCE(departments.tuition_cents_per_month, 0) AS tuition_cents_per_month,
                   COALESCE(departments.fringe_rate_bps, 0) AS fringe_rate_bps
            FROM students LEFT JOIN departments ON departments.id = students.department_id
@@ -295,20 +349,26 @@ def student_allocation_grid(student_id, scenario_id):
             if cell:
                 totals[i] += cell
 
+    months_chargeable = [is_chargeable(m, student_row["expected_graduation"]) for m in months]
+
     total_breakdown = empty_cost_breakdown()
     for r in rows:
-        cost = allocation_cost_cents(
-            student_row["stipend_cents_per_month"],
-            student_row["tuition_cents_per_month"],
-            student_row["fringe_rate_bps"],
-            r["overhead_rate_bps"],
-            r["percent"],
-        )
+        if is_chargeable(r["month"], student_row["expected_graduation"]):
+            cost = allocation_cost_cents(
+                student_row["stipend_cents_per_month"],
+                student_row["tuition_cents_per_month"],
+                student_row["fringe_rate_bps"],
+                r["overhead_rate_bps"],
+                r["percent"],
+            )
+        else:
+            cost = empty_cost_breakdown()
         add_cost_breakdown(total_breakdown, cost)
 
     return {
         "months": months,
         "month_labels": [month_label(m) for m in months],
+        "months_chargeable": months_chargeable,
         "rows": grant_rows,
         "totals": totals,
         "breakdown": total_breakdown,
@@ -520,18 +580,23 @@ def add_student():
     name = request.form.get("name", "").strip()
     stipend_cents = parse_money(request.form.get("stipend", "0") or "0")
     department_id = parse_department_id(request.form.get("department_id"))
+    expected_graduation, graduation_ok = parse_optional_date(request.form.get("expected_graduation", ""))
     if not name:
         flash("Student name is required.")
     elif stipend_cents is None:
         flash("Monthly stipend must be a non-negative number.")
+    elif not graduation_ok:
+        flash("Expected graduation must be a valid date.")
     else:
         get_db().execute(
-            "INSERT INTO students (name, email, department_id, stipend_cents_per_month, notes) VALUES (?, ?, ?, ?, ?)",
+            """INSERT INTO students (name, email, department_id, stipend_cents_per_month, expected_graduation, notes)
+               VALUES (?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 request.form.get("email", "").strip(),
                 department_id,
                 stipend_cents,
+                expected_graduation.isoformat() if expected_graduation else None,
                 request.form.get("notes", "").strip(),
             ),
         )
@@ -574,18 +639,23 @@ def edit_student(student_id):
     name = request.form.get("name", "").strip()
     stipend_cents = parse_money(request.form.get("stipend", "0") or "0")
     department_id = parse_department_id(request.form.get("department_id"))
+    expected_graduation, graduation_ok = parse_optional_date(request.form.get("expected_graduation", ""))
     if not name:
         flash("Student name is required.")
     elif stipend_cents is None:
         flash("Monthly stipend must be a non-negative number.")
+    elif not graduation_ok:
+        flash("Expected graduation must be a valid date.")
     else:
         get_db().execute(
-            "UPDATE students SET name = ?, email = ?, department_id = ?, stipend_cents_per_month = ?, notes = ? WHERE id = ?",
+            """UPDATE students SET name = ?, email = ?, department_id = ?, stipend_cents_per_month = ?,
+               expected_graduation = ?, notes = ? WHERE id = ?""",
             (
                 name,
                 request.form.get("email", "").strip(),
                 department_id,
                 stipend_cents,
+                expected_graduation.isoformat() if expected_graduation else None,
                 request.form.get("notes", "").strip(),
                 student_id,
             ),
@@ -693,19 +763,22 @@ def departments_page():
 @app.route("/departments/add", methods=["POST"])
 def add_department():
     name = request.form.get("name", "").strip()
+    stipend_cents = parse_money(request.form.get("stipend", "0") or "0")
     tuition_cents = parse_money(request.form.get("tuition", "0") or "0")
     fringe_rate_bps = parse_rate(request.form.get("fringe_rate", "0") or "0")
 
     if not name:
         flash("Department name is required.")
+    elif stipend_cents is None:
+        flash("Stipend must be a non-negative number.")
     elif tuition_cents is None:
         flash("Tuition must be a non-negative number.")
     elif fringe_rate_bps is None:
         flash("Fringe rate must be a non-negative number.")
     else:
         get_db().execute(
-            "INSERT INTO departments (name, tuition_cents_per_month, fringe_rate_bps) VALUES (?, ?, ?)",
-            (name, tuition_cents, fringe_rate_bps),
+            "INSERT INTO departments (name, stipend_cents_per_month, tuition_cents_per_month, fringe_rate_bps) VALUES (?, ?, ?, ?)",
+            (name, stipend_cents, tuition_cents, fringe_rate_bps),
         )
         get_db().commit()
     return redirect(url_for("departments_page"))
@@ -714,19 +787,22 @@ def add_department():
 @app.route("/departments/<int:department_id>/edit", methods=["POST"])
 def edit_department(department_id):
     name = request.form.get("name", "").strip()
+    stipend_cents = parse_money(request.form.get("stipend", "0") or "0")
     tuition_cents = parse_money(request.form.get("tuition", "0") or "0")
     fringe_rate_bps = parse_rate(request.form.get("fringe_rate", "0") or "0")
 
     if not name:
         flash("Department name is required.")
+    elif stipend_cents is None:
+        flash("Stipend must be a non-negative number.")
     elif tuition_cents is None:
         flash("Tuition must be a non-negative number.")
     elif fringe_rate_bps is None:
         flash("Fringe rate must be a non-negative number.")
     else:
         get_db().execute(
-            "UPDATE departments SET name = ?, tuition_cents_per_month = ?, fringe_rate_bps = ? WHERE id = ?",
-            (name, tuition_cents, fringe_rate_bps, department_id),
+            "UPDATE departments SET name = ?, stipend_cents_per_month = ?, tuition_cents_per_month = ?, fringe_rate_bps = ? WHERE id = ?",
+            (name, stipend_cents, tuition_cents, fringe_rate_bps, department_id),
         )
         get_db().commit()
     return redirect(url_for("departments_page"))

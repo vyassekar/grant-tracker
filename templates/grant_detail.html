@@ -74,7 +74,7 @@
         <tr>
           <td>{{ row.name }}</td>
           {% for cell in row.cells %}
-          <td class="alloc-cell">{% if cell %}<span class="alloc-pill" style="opacity: {{ (cell / 100 * 0.7 + 0.3) | round(2) }};">{{ cell }}%</span>{% endif %}</td>
+          <td class="alloc-cell {{ '' if cell.chargeable else 'post-grad' }}">{% if cell.percent %}<span class="alloc-pill" style="opacity: {{ (cell.percent / 100 * 0.7 + 0.3) | round(2) }};">{{ cell.percent }}%</span>{% endif %}</td>
           {% endfor %}
         </tr>
         {% endfor %}
@@ -87,6 +87,7 @@
       </tfoot>
     </table>
   </div>
+  <p class="hint">Shaded cells are months after that student's expected graduation and aren't included in the projected cost.</p>
 
   <div class="stats">
     <div><span class="stat-label">Stipend</span><span class="stat-value">${{ grid.breakdown.stipend | money }}</span></div>

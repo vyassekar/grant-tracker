@@ -20,7 +20,11 @@
 
 <section>
   <h1>{{ student.name }}</h1>
-  <p class="meta">{{ student.email }} &middot; {{ student.department_name or "No department" }} &middot; ${{ student.stipend_cents_per_month | money }}/month stipend</p>
+  <p class="meta">
+    {{ student.email }} &middot; {{ student.department_name or "No department" }} &middot;
+    ${{ student.stipend_cents_per_month | money }}/month stipend
+    {% if student.expected_graduation %} &middot; expected graduation {{ student.expected_graduation }}{% endif %}
+  </p>
   {% if student.notes %}<p class="notes">{{ student.notes }}</p>{% endif %}
 
   <details>
@@ -29,7 +33,7 @@
       <label>Name <input name="name" value="{{ student.name }}" required></label>
       <label>Email <input name="email" type="email" value="{{ student.email }}"></label>
       <label>Department
-        <select name="department_id">
+        <select name="department_id" onchange="if(this.value){ this.form.stipend.value = (deptStipends[this.value] || 0).toFixed(2); }">
           <option value="">None</option>
           {% for d in departments %}
           <option value="{{ d.id }}" {{ "selected" if d.id == student.department_id else "" }}>{{ d.name }}</option>
@@ -37,6 +41,7 @@
         </select>
       </label>
       <label>Monthly stipend <input name="stipend" type="number" step="0.01" min="0" value="{{ student.stipend_cents_per_month | money }}"></label>
+      <label>Expected graduation <input name="expected_graduation" type="date" value="{{ student.expected_graduation or '' }}"></label>
       <label>Notes <input name="notes" value="{{ student.notes }}"></label>
       <button type="submit">Save changes</button>
     </form>
@@ -45,6 +50,9 @@
       <button type="submit" class="danger">Delete student</button>
     </form>
   </details>
+  <script>
+    const deptStipends = { {% for d in departments %}{{ d.id }}: {{ d.stipend_cents_per_month | money }}{{ "," if not loop.last }}{% endfor %} };
+  </script>
 </section>
 
 <section>
@@ -53,14 +61,14 @@
   <div class="grid-wrapper">
     <table class="alloc-grid">
       <thead>
-        <tr><th>Grant</th>{% for label in grid.month_labels %}<th>{{ label }}</th>{% endfor %}</tr>
+        <tr><th>Grant</th>{% for label in grid.month_labels %}<th class="{{ '' if grid.months_chargeable[loop.index0] else 'post-grad' }}">{{ label }}</th>{% endfor %}</tr>
       </thead>
       <tbody>
         {% for row in grid.rows %}
         <tr>
           <td><a href="{{ url_for('grant_detail', grant_id=row.grant_id, scenario=current_scenario_id) }}">{{ row.name }}</a></td>
           {% for cell in row.cells %}
-          <td class="alloc-cell">{% if cell %}<span class="alloc-pill" style="opacity: {{ (cell / 100 * 0.7 + 0.3) | round(2) }};">{{ cell }}%</span>{% endif %}</td>
+          <td class="alloc-cell {{ '' if grid.months_chargeable[loop.index0] else 'post-grad' }}">{% if cell %}<span class="alloc-pill" style="opacity: {{ (cell / 100 * 0.7 + 0.3) | round(2) }};">{{ cell }}%</span>{% endif %}</td>
           {% endfor %}
         </tr>
         {% endfor %}
@@ -75,6 +83,9 @@
       </tfoot>
     </table>
   </div>
+  {% if grid.months_chargeable is defined and false in grid.months_chargeable %}
+  <p class="hint">Shaded months are after {{ student.name }}'s expected graduation ({{ student.expected_graduation }}) and aren't included in the projected cost.</p>
+  {% endif %}
 
   <div class="stats">
     <div><span class="stat-label">Stipend</span><span class="stat-value">${{ grid.breakdown.stipend | money }}</span></div>

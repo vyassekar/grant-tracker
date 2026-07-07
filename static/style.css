@@ -195,6 +195,8 @@ table.alloc-grid tfoot td { font-weight: 600; color: var(--muted); border-top: 1
 
 .over-allocated { color: #991b1b; font-weight: 700; }
 
+.post-grad { background: repeating-linear-gradient(45deg, #f3f4f6, #f3f4f6 6px, #e5e7eb 6px, #e5e7eb 12px); }
+
 .flash {
   background: #fef3c7;
   color: #92400e;
