@@ -5,14 +5,13 @@
 <section>
   <h1>Grants</h1>
   <div class="toggle-bar">
-    <a href="{{ url_for('index', hide_closed=1 if hide_closed else None) }}" class="toggle {{ 'active' if not category_filter }}">All</a>
-    <a href="{{ url_for('index', category='sponsored', hide_closed=1 if hide_closed else None) }}" class="toggle {{ 'active' if category_filter == 'sponsored' }}">Sponsored</a>
-    <a href="{{ url_for('index', category='gift', hide_closed=1 if hide_closed else None) }}" class="toggle {{ 'active' if category_filter == 'gift' }}">Gift</a>
-    <a href="{{ url_for('index', category='internal', hide_closed=1 if hide_closed else None) }}" class="toggle {{ 'active' if category_filter == 'internal' }}">Internal</a>
+    <a href="{{ category_clear_url }}" class="toggle {{ 'active' if not category_filter }}">All</a>
+    <a href="{{ category_toggle_urls['sponsored'] }}" class="toggle {{ 'active' if 'sponsored' in category_filter }}">Sponsored</a>
+    <a href="{{ category_toggle_urls['gift'] }}" class="toggle {{ 'active' if 'gift' in category_filter }}">Gift</a>
+    <a href="{{ category_toggle_urls['internal'] }}" class="toggle {{ 'active' if 'internal' in category_filter }}">Internal</a>
   </div>
   <div class="toggle-bar">
-    <a href="{{ url_for('index', category=category_filter) }}" class="toggle {{ '' if hide_closed else 'active' }}">All statuses</a>
-    <a href="{{ url_for('index', category=category_filter, hide_closed=1) }}" class="toggle {{ 'active' if hide_closed else '' }}">Hide expired/overspent</a>
+    <a href="{{ hide_closed_toggle_url }}" class="toggle {{ 'active' if hide_closed }}">Hide expired/overspent</a>
   </div>
   <table>
     <thead>

@@ -490,16 +490,15 @@ def student_allocation_grid(student_id, scenario_id):
 @app.route("/")
 def index():
     db = get_db()
-    category_filter = request.args.get("category")
-    if category_filter not in GRANT_CATEGORIES:
-        category_filter = None
+    category_filter = set(request.args.getlist("category")) & GRANT_CATEGORIES
     hide_closed = request.args.get("hide_closed") == "1"
 
     query = "SELECT * FROM grants"
     params = ()
     if category_filter:
-        query += " WHERE category = ?"
-        params = (category_filter,)
+        placeholders = ",".join("?" for _ in category_filter)
+        query += f" WHERE category IN ({placeholders})"
+        params = tuple(category_filter)
     query += " ORDER BY end_date"
 
     grants = [grant_with_balance(r) for r in db.execute(query, params)]
@@ -515,6 +514,19 @@ def index():
            ORDER BY students.name"""
     ).fetchall()
     departments = db.execute("SELECT * FROM departments ORDER BY name").fetchall()
+
+    # Each category pill's link toggles just that category in/out of the current
+    # selection (keeping the others and hide_closed), so more than one can be active
+    # at once; the "All" pill clears the selection entirely.
+    hide_closed_param = 1 if hide_closed else None
+    category_toggle_urls = {
+        category: url_for("index", category=sorted(category_filter ^ {category}), hide_closed=hide_closed_param)
+        for category in GRANT_CATEGORIES
+    }
+    category_clear_url = url_for("index", hide_closed=hide_closed_param)
+
+    hide_closed_toggle_url = url_for("index", category=sorted(category_filter), hide_closed=None if hide_closed else 1)
+
     return render_template(
         "index.html",
         grants=grants,
@@ -522,7 +534,10 @@ def index():
         departments=departments,
         today=date.today().isoformat(),
         category_filter=category_filter,
+        category_toggle_urls=category_toggle_urls,
+        category_clear_url=category_clear_url,
         hide_closed=hide_closed,
+        hide_closed_toggle_url=hide_closed_toggle_url,
     )
 
 

@@ -50,12 +50,17 @@ scenarios), ideally against `seed_demo.py` data.
 
 - `grants` — one row per award. Carries its own `overhead_rate_bps` (F&A rate; varies
   by sponsor, not department). `category` (`'sponsored'`, `'gift'`, or `'internal'`,
-  validated by `parse_category()`/`GRANT_CATEGORIES`) drives the dashboard's toggle
-  filter (`?category=` query param on `/`) — purely a classification, doesn't affect
-  cost math. The dashboard also has an independent `?hide_closed=1` toggle that drops
-  expired grants and any with a negative `balance_cents` (spent beyond the awarded
-  total) from view; the two query params compose and each toggle's links preserve the
-  other's current value (see `index()` and `index.html`).
+  validated by `parse_category()`/`GRANT_CATEGORIES`) drives the dashboard's category
+  filter — purely a classification, doesn't affect cost math. It's multi-select: `/`
+  takes zero or more repeated `?category=` params (`category_filter` in `index()` is a
+  `set`), and each pill's link toggles just that one category in/out of the current
+  selection via `category_toggle_urls` (precomputed server-side with `url_for(...,
+  category=<new set>)` rather than in the template, since building that per-pill "set
+  XOR one value, keep everything else" URL is easier in Python than Jinja). The
+  dashboard also has an independent `?hide_closed=1` toggle (a single pill, not a
+  pair — `hide_closed_toggle_url`) that drops expired grants and any with a negative
+  `balance_cents` (spent beyond the awarded total) from view. Both filters compose and
+  preserve each other's current state across clicks.
 - `departments` — per-department **default** billing rates: `stipend_cents_per_month`,
   `tuition_cents_per_month`, `fringe_rate_bps`. The stipend is a default only — see
   below.
