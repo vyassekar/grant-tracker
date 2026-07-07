@@ -41,11 +41,12 @@ def insert_grant(db, name, sponsor, total_dollars, overhead_rate_percent, start_
     return cur.lastrowid
 
 
-def insert_student(db, name, email, department_id, stipend_dollars, expected_graduation=None, notes=""):
+def insert_student(db, name, email, department_id, stipend_dollars, role="student", start_date=None,
+                    expected_graduation=None, notes=""):
     cur = db.execute(
-        """INSERT INTO students (name, email, department_id, stipend_cents_per_month, expected_graduation, notes)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (name, email, department_id, round(stipend_dollars * 100), expected_graduation, notes),
+        """INSERT INTO students (name, email, department_id, role, stipend_cents_per_month, start_date,
+           expected_graduation, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (name, email, department_id, role, round(stipend_dollars * 100), start_date, expected_graduation, notes),
     )
     return cur.lastrowid
 
@@ -92,13 +93,17 @@ def seed_maria_santos():
     doe = insert_grant(db, "DOE Early Career Award", "DOE", 400_000, 15, "2025-01-01", "2026-03-31")
     sloan = insert_grant(db, "Sloan Research Fellowship", "Alfred P. Sloan Foundation", 75_000, 0, "2025-09-01", "2027-08-31")
 
-    chen = insert_student(db, "Maria Chen", "mchen@university.edu", cs, 3800)
-    okafor = insert_student(db, "David Okafor", "dokafor@university.edu", cs, 3600)
-    nair = insert_student(db, "Priya Nair", "pnair@university.edu", bio, 3400)
-    wilson = insert_student(db, "Sam Wilson", "swilson@university.edu", me, 3900)
+    chen = insert_student(db, "Maria Chen", "mchen@university.edu", cs, 3800, start_date="2023-09-01")
+    # Starts mid-scenario, to demo that no personnel cost is projected before this date even
+    # though his NIH/DOE allocations begin in 2026-01.
+    okafor = insert_student(db, "David Okafor", "dokafor@university.edu", cs, 3600, role="postdoc",
+                             start_date="2026-02-01")
+    nair = insert_student(db, "Priya Nair", "pnair@university.edu", bio, 3400, start_date="2024-01-15")
+    wilson = insert_student(db, "Sam Wilson", "swilson@university.edu", me, 3900, start_date="2022-09-01")
     # Graduating mid-scenario, to demo that no personnel cost is projected past this date
     # even though her NIH/scenario allocations continue through 2026-07.
-    tanaka = insert_student(db, "Yuki Tanaka", "ytanaka@university.edu", bio, 3300, expected_graduation="2026-05-31")
+    tanaka = insert_student(db, "Yuki Tanaka", "ytanaka@university.edu", bio, 3300,
+                             start_date="2021-09-01", expected_graduation="2026-05-31")
 
     insert_allocation(db, None, chen, nsf, "2026-01", "2026-12", 100)
     insert_allocation(db, None, okafor, nih, "2026-01", "2026-03", 60)
@@ -146,8 +151,9 @@ def seed_alex_rivera():
     nsf_physics = insert_grant(db, "NSF Physics Frontiers", "NSF", 300_000, 48, "2025-06-01", "2028-05-31")
     templeton = insert_grant(db, "Templeton Foundation Grant", "John Templeton Foundation", 120_000, 10, "2024-01-01", "2026-06-30")
 
-    petrov = insert_student(db, "Elena Petrov", "epetrov@university.edu", physics, 3700)
-    webb = insert_student(db, "Marcus Webb", "mwebb@university.edu", physics, 3500)
+    petrov = insert_student(db, "Elena Petrov", "epetrov@university.edu", physics, 3700, start_date="2023-09-01")
+    webb = insert_student(db, "Marcus Webb", "mwebb@university.edu", physics, 3500, role="postdoc",
+                           start_date="2025-06-01")
 
     insert_allocation(db, None, petrov, nsf_physics, "2026-01", "2026-12", 100)
     insert_allocation(db, None, webb, templeton, "2026-01", "2026-06", 100)

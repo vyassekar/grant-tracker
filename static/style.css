@@ -92,6 +92,9 @@ a { color: var(--accent); }
 .badge-expiring-soon { background: #fef3c7; color: #92400e; }
 .badge-expired { background: #fee2e2; color: #991b1b; }
 
+.badge-role-student { background: #dbeafe; color: #1e40af; }
+.badge-role-postdoc { background: #ede9fe; color: #5b21b6; }
+
 .stats { display: flex; gap: 2rem; margin-top: 1rem; }
 .stat-label { display: block; color: var(--muted); font-size: 0.8rem; }
 .stat-value { display: block; font-size: 1.3rem; font-weight: 600; }

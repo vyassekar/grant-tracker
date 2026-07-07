@@ -38,14 +38,17 @@ scenarios), ideally against `seed_demo.py` data.
 - `departments` — per-department **default** billing rates: `stipend_cents_per_month`,
   `tuition_cents_per_month`, `fringe_rate_bps`. The stipend is a default only — see
   below.
-- `students` — `stipend_cents_per_month` is stored per student (not just looked up
-  from `departments`), so it can diverge from the department default. The app
-  auto-fills it from the student's department when the department is picked/changed
-  in the add/edit form (inline `onchange` JS in `index.html` / `student_detail.html`,
-  driven by a `deptStipends` JS object rendered from the `departments` list) — but the
-  value is editable afterward and that's what cost calculations use.
-  `expected_graduation` (nullable ISO date) — when set, allocation months starting
-  after this date aren't charged (see below).
+- `students` — despite the table name, this holds both students and postdocs;
+  `role` (`'student'` or `'postdoc'`, validated by `parse_role()`/`STUDENT_ROLES` in
+  `app.py`) distinguishes them for display only — nothing else in the data model or
+  cost logic treats them differently. `stipend_cents_per_month` is stored per person
+  (not just looked up from `departments`), so it can diverge from the department
+  default. The app auto-fills it from the person's department when the department is
+  picked/changed in the add/edit form (inline `onchange` JS in `index.html` /
+  `student_detail.html`, driven by a `deptStipends` JS object rendered from the
+  `departments` list) — but the value is editable afterward and that's what cost
+  calculations use. `start_date` / `expected_graduation` (nullable ISO dates) — when
+  set, allocation months outside that window aren't charged (see below).
 - `transactions` — recorded spend against a grant, independent of projected cost.
 - `allocations` — student × grant × month × percent. `scenario_id IS NULL` means live
   data; a non-null `scenario_id` is a cloned what-if universe (see `scenarios`).
@@ -63,12 +66,13 @@ student × grant × month × percent. Overhead is computed on stipend+fringe onl
 (tuition excluded, matching typical federal MTDC rules) — this is a fixed formula, not
 configurable per institution; edit it in place if your accounting differs.
 
-`is_chargeable(month_str, expected_graduation_str)` gates whether that formula runs at
-all for a given month: a student's allocation percent is still recorded and shown past
-their `expected_graduation`, but the projected cost for those months is zero. The month
-graduation falls in is still charged in full (monthly granularity, no proration).
-Templates shade those months/cells with the `.post-grad` CSS class so the cutoff is
-visible, not just silently absent from the totals.
+`is_chargeable(month_str, start_date_str, expected_graduation_str)` gates whether that
+formula runs at all for a given month: a person's allocation percent is still recorded
+and shown outside `[start_date, expected_graduation]`, but the projected cost for those
+months is zero. A month that only partially overlaps the window (they start or graduate
+mid-month) is still charged in full — monthly granularity, no proration. Templates shade
+those months/cells with the `.post-grad` CSS class so the cutoff is visible, not just
+silently absent from the totals.
 
 ### Schema migrations
 

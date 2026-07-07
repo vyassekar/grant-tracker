@@ -65,6 +65,10 @@ def migrate_db(db):
     student_cols = {row["name"] for row in db.execute("PRAGMA table_info(students)")}
     if "expected_graduation" not in student_cols:
         db.execute("ALTER TABLE students ADD COLUMN expected_graduation TEXT")
+    if "start_date" not in student_cols:
+        db.execute("ALTER TABLE students ADD COLUMN start_date TEXT")
+    if "role" not in student_cols:
+        db.execute("ALTER TABLE students ADD COLUMN role TEXT NOT NULL DEFAULT 'student'")
     db.commit()
 
 
@@ -161,6 +165,11 @@ def month_label(month_str):
     return f"{calendar.month_abbr[int(month)]} {year}"
 
 
+def month_end(month_start):
+    last_day = calendar.monthrange(month_start.year, month_start.month)[1]
+    return date(month_start.year, month_start.month, last_day)
+
+
 def parse_scenario_arg(raw):
     try:
         return int(raw)
@@ -183,16 +192,20 @@ def grant_status(end_date_str):
     return "active"
 
 
-def is_chargeable(month_str, expected_graduation_str):
-    """False if `month_str` (YYYY-MM) starts after the student's expected graduation date.
+def is_chargeable(month_str, start_date_str, expected_graduation_str):
+    """False if `month_str` (YYYY-MM) falls entirely outside [start_date, expected_graduation].
 
-    A student isn't charged to any grant for months entirely after they're expected to
-    graduate. The month graduation falls in is still charged in full, since allocations
+    A student isn't charged to any grant for months entirely before their start date or
+    entirely after their expected graduation. A month that only partially overlaps that
+    window (they start or graduate mid-month) is still charged in full, since allocations
     are tracked at monthly granularity.
     """
-    if not expected_graduation_str:
-        return True
-    return parse_month(month_str) <= date.fromisoformat(expected_graduation_str)
+    month_start = parse_month(month_str)
+    if expected_graduation_str and month_start > date.fromisoformat(expected_graduation_str):
+        return False
+    if start_date_str and month_end(month_start) < date.fromisoformat(start_date_str):
+        return False
+    return True
 
 
 def allocation_cost_cents(stipend_cents_per_month, tuition_cents_per_month, fringe_rate_bps, overhead_rate_bps, percent):
@@ -247,7 +260,7 @@ def grant_allocation_grid(grant_id, scenario_id):
     rows = db.execute(
         f"""SELECT allocations.month, allocations.percent, students.id AS student_id,
                    students.name AS student_name, students.stipend_cents_per_month,
-                   students.expected_graduation,
+                   students.start_date, students.expected_graduation,
                    COALESCE(departments.tuition_cents_per_month, 0) AS tuition_cents_per_month,
                    COALESCE(departments.fringe_rate_bps, 0) AS fringe_rate_bps
             FROM allocations
@@ -266,7 +279,13 @@ def grant_allocation_grid(grant_id, scenario_id):
     by_student = {}
     for r in rows:
         entry = by_student.setdefault(
-            r["student_id"], {"name": r["student_name"], "expected_graduation": r["expected_graduation"], "percents": {}}
+            r["student_id"],
+            {
+                "name": r["student_name"],
+                "start_date": r["start_date"],
+                "expected_graduation": r["expected_graduation"],
+                "percents": {},
+            },
         )
         entry["percents"][r["month"]] = r["percent"]
 
@@ -274,7 +293,10 @@ def grant_allocation_grid(grant_id, scenario_id):
         {
             "name": data["name"],
             "cells": [
-                {"percent": data["percents"].get(m), "chargeable": is_chargeable(m, data["expected_graduation"])}
+                {
+                    "percent": data["percents"].get(m),
+                    "chargeable": is_chargeable(m, data["start_date"], data["expected_graduation"]),
+                }
                 for m in months
             ],
         }
@@ -284,7 +306,7 @@ def grant_allocation_grid(grant_id, scenario_id):
     cost_by_month = {m: empty_cost_breakdown() for m in months}
     total_breakdown = empty_cost_breakdown()
     for r in rows:
-        if is_chargeable(r["month"], r["expected_graduation"]):
+        if is_chargeable(r["month"], r["start_date"], r["expected_graduation"]):
             cost = allocation_cost_cents(
                 r["stipend_cents_per_month"], r["tuition_cents_per_month"], r["fringe_rate_bps"], overhead_rate_bps, r["percent"]
             )
@@ -308,7 +330,7 @@ def student_allocation_grid(student_id, scenario_id):
     """Grants x months grid of % allocation for this student, plus a per-month total (should stay <=100)."""
     db = get_db()
     student_row = db.execute(
-        """SELECT students.stipend_cents_per_month, students.expected_graduation,
+        """SELECT students.stipend_cents_per_month, students.start_date, students.expected_graduation,
                   COALESCE(departments.tuition_cents_per_month, 0) AS tuition_cents_per_month,
                   COALESCE(departments.fringe_rate_bps, 0) AS fringe_rate_bps
            FROM students LEFT JOIN departments ON departments.id = students.department_id
@@ -349,11 +371,11 @@ def student_allocation_grid(student_id, scenario_id):
             if cell:
                 totals[i] += cell
 
-    months_chargeable = [is_chargeable(m, student_row["expected_graduation"]) for m in months]
+    months_chargeable = [is_chargeable(m, student_row["start_date"], student_row["expected_graduation"]) for m in months]
 
     total_breakdown = empty_cost_breakdown()
     for r in rows:
-        if is_chargeable(r["month"], student_row["expected_graduation"]):
+        if is_chargeable(r["month"], student_row["start_date"], student_row["expected_graduation"]):
             cost = allocation_cost_cents(
                 student_row["stipend_cents_per_month"],
                 student_row["tuition_cents_per_month"],
@@ -575,27 +597,43 @@ def parse_department_id(raw):
         return None
 
 
+STUDENT_ROLES = {"student", "postdoc"}
+
+
+def parse_role(raw):
+    raw = (raw or "").strip().lower()
+    return raw if raw in STUDENT_ROLES else None
+
+
 @app.route("/students/add", methods=["POST"])
 def add_student():
     name = request.form.get("name", "").strip()
     stipend_cents = parse_money(request.form.get("stipend", "0") or "0")
     department_id = parse_department_id(request.form.get("department_id"))
+    role = parse_role(request.form.get("role", "student"))
+    start_date, start_date_ok = parse_optional_date(request.form.get("start_date", ""))
     expected_graduation, graduation_ok = parse_optional_date(request.form.get("expected_graduation", ""))
     if not name:
         flash("Student name is required.")
     elif stipend_cents is None:
         flash("Monthly stipend must be a non-negative number.")
+    elif role is None:
+        flash("Role must be student or postdoc.")
+    elif not start_date_ok:
+        flash("Start date must be a valid date.")
     elif not graduation_ok:
         flash("Expected graduation must be a valid date.")
     else:
         get_db().execute(
-            """INSERT INTO students (name, email, department_id, stipend_cents_per_month, expected_graduation, notes)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO students (name, email, department_id, role, stipend_cents_per_month, start_date,
+               expected_graduation, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 request.form.get("email", "").strip(),
                 department_id,
+                role,
                 stipend_cents,
+                start_date.isoformat() if start_date else None,
                 expected_graduation.isoformat() if expected_graduation else None,
                 request.form.get("notes", "").strip(),
             ),
@@ -639,22 +677,30 @@ def edit_student(student_id):
     name = request.form.get("name", "").strip()
     stipend_cents = parse_money(request.form.get("stipend", "0") or "0")
     department_id = parse_department_id(request.form.get("department_id"))
+    role = parse_role(request.form.get("role", "student"))
+    start_date, start_date_ok = parse_optional_date(request.form.get("start_date", ""))
     expected_graduation, graduation_ok = parse_optional_date(request.form.get("expected_graduation", ""))
     if not name:
         flash("Student name is required.")
     elif stipend_cents is None:
         flash("Monthly stipend must be a non-negative number.")
+    elif role is None:
+        flash("Role must be student or postdoc.")
+    elif not start_date_ok:
+        flash("Start date must be a valid date.")
     elif not graduation_ok:
         flash("Expected graduation must be a valid date.")
     else:
         get_db().execute(
-            """UPDATE students SET name = ?, email = ?, department_id = ?, stipend_cents_per_month = ?,
-               expected_graduation = ?, notes = ? WHERE id = ?""",
+            """UPDATE students SET name = ?, email = ?, department_id = ?, role = ?, stipend_cents_per_month = ?,
+               start_date = ?, expected_graduation = ?, notes = ? WHERE id = ?""",
             (
                 name,
                 request.form.get("email", "").strip(),
                 department_id,
+                role,
                 stipend_cents,
+                start_date.isoformat() if start_date else None,
                 expected_graduation.isoformat() if expected_graduation else None,
                 request.form.get("notes", "").strip(),
                 student_id,

@@ -27,11 +27,16 @@ CREATE TABLE students (
     name TEXT NOT NULL,
     email TEXT,
     department_id INTEGER REFERENCES departments(id),
+    -- 'student' or 'postdoc'. Both are tracked in this same table (grants/allocations
+    -- don't otherwise care which); the app enforces the two allowed values.
+    role TEXT NOT NULL DEFAULT 'student',
     -- Defaults to the department's stipend when set via the app; stored per-student
     -- so it can still be overridden for students who differ from their department's rate.
     stipend_cents_per_month INTEGER NOT NULL DEFAULT 0,
-    -- ISO date (YYYY-MM-DD). When set, no personnel cost is projected for allocation
-    -- months starting after this date -- see is_chargeable() in app.py.
+    -- ISO dates (YYYY-MM-DD), both optional. When set, no personnel cost is projected
+    -- for allocation months entirely outside [start_date, expected_graduation] --
+    -- see is_chargeable() in app.py.
+    start_date TEXT,
     expected_graduation TEXT,
     notes TEXT
 );
