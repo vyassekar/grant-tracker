@@ -1,5 +1,6 @@
 import calendar
 import re
+import shutil
 import sqlite3
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -11,6 +12,13 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 SCHEMA_PATH = BASE_DIR / "schema.sql"
 EXPIRING_SOON_DAYS = 60
+GRANT_CATEGORIES = {"sponsored", "gift", "internal"}
+# A grant's projected burn rate (current monthly personnel cost x months left until its
+# end date) vs. its remaining balance flags a spending risk outside these ratios. Tuned
+# to avoid noise from small month-to-month allocation changes; adjust if that's too
+# sensitive/insensitive for your grants.
+GRANT_OVERSPEND_RATIO = 1.15
+GRANT_UNDERSPEND_RATIO = 0.6
 
 app = Flask(__name__)
 # Only used to sign session/flash cookies for this local, single-user tool (no
@@ -27,6 +35,10 @@ NO_FACULTY_REQUIRED_ENDPOINTS = {"faculty_page", "select_faculty", "add_faculty"
 
 def faculty_db_path(slug):
     return DATA_DIR / f"{slug}.db"
+
+
+def faculty_backup_path(slug, for_date):
+    return DATA_DIR / f"{slug}.db.bak-{for_date:%Y%m%d}"
 
 
 def list_faculty():
@@ -69,6 +81,9 @@ def migrate_db(db):
         db.execute("ALTER TABLE students ADD COLUMN start_date TEXT")
     if "role" not in student_cols:
         db.execute("ALTER TABLE students ADD COLUMN role TEXT NOT NULL DEFAULT 'student'")
+    grant_cols = {row["name"] for row in db.execute("PRAGMA table_info(grants)")}
+    if "category" not in grant_cols:
+        db.execute("ALTER TABLE grants ADD COLUMN category TEXT NOT NULL DEFAULT 'sponsored'")
     db.commit()
 
 
@@ -79,6 +94,32 @@ def require_faculty():
     slug = session.get("faculty_db")
     if not slug or not faculty_db_path(slug).exists():
         return redirect(url_for("faculty_page"))
+    return None
+
+
+@app.before_request
+def backup_before_write():
+    """Snapshot the active faculty db before its first write of the day.
+
+    Cheap insurance against a bad edit clobbering real data with no way back (this
+    isn't hypothetical -- an errant test write once did exactly that during
+    development). One rolling backup per faculty per calendar day, not a full
+    history; back the file up yourself before anything riskier (bulk edits, manual
+    schema surgery) if you want more than a same-day rollback. Old dated backups
+    aren't auto-pruned -- they're plain small SQLite files, so clean them up by hand
+    if that ever matters.
+    """
+    if request.method != "POST":
+        return None
+    slug = session.get("faculty_db")
+    if not slug:
+        return None
+    db_path = faculty_db_path(slug)
+    if not db_path.exists():
+        return None
+    backup_path = faculty_backup_path(slug, date.today())
+    if not backup_path.exists():
+        shutil.copy2(db_path, backup_path)
     return None
 
 
@@ -125,6 +166,11 @@ def parse_date(raw):
         return date.fromisoformat(raw.strip())
     except (ValueError, AttributeError):
         return None
+
+
+def parse_category(raw):
+    raw = (raw or "").strip().lower()
+    return raw if raw in GRANT_CATEGORIES else None
 
 
 def parse_optional_date(raw):
@@ -246,6 +292,50 @@ def grant_with_balance(row):
     grant["balance_cents"] = row["total_amount_cents"] - spent_cents
     grant["status"] = grant_status(row["end_date"])
     return grant
+
+
+def current_monthly_burn_cents(grid):
+    """Projected personnel cost for the grant's "current" month: this calendar month if
+    it's in the allocation grid, else the nearest future month, else 0 if there's no
+    ongoing/future allocation to extrapolate a burn rate from."""
+    if not grid:
+        return 0
+    today_month = date.today().strftime("%Y-%m")
+    for month, cost in zip(grid["months"], grid["monthly_costs"]):
+        if month >= today_month:
+            return cost
+    return 0
+
+
+def grant_spending_risk(grant, grid):
+    """'overspending', 'underspending', or None (on track / not evaluated).
+
+    Extrapolates the grant's current monthly personnel burn rate (see
+    current_monthly_burn_cents) across its remaining months and compares that
+    projection to its remaining (unspent) balance. Only evaluated for non-expired
+    grants -- an expired grant's spending is done, not "at risk".
+    """
+    if grant["status"] == "expired":
+        return None
+    balance = grant["balance_cents"]
+    if balance <= 0:
+        return "overspending"
+
+    burn_rate = current_monthly_burn_cents(grid)
+    if burn_rate == 0:
+        return "underspending"
+
+    today = date.today()
+    end_date = date.fromisoformat(grant["end_date"])
+    months_remaining = len(month_range(date(today.year, today.month, 1), date(end_date.year, end_date.month, 1)))
+    projected_remaining_spend = burn_rate * months_remaining
+
+    ratio = projected_remaining_spend / balance
+    if ratio > GRANT_OVERSPEND_RATIO:
+        return "overspending"
+    if ratio < GRANT_UNDERSPEND_RATIO:
+        return "underspending"
+    return None
 
 
 def grant_allocation_grid(grant_id, scenario_id):
@@ -400,10 +490,22 @@ def student_allocation_grid(student_id, scenario_id):
 @app.route("/")
 def index():
     db = get_db()
-    grants = [grant_with_balance(r) for r in db.execute("SELECT * FROM grants ORDER BY end_date")]
+    category_filter = request.args.get("category")
+    if category_filter not in GRANT_CATEGORIES:
+        category_filter = None
+
+    query = "SELECT * FROM grants"
+    params = ()
+    if category_filter:
+        query += " WHERE category = ?"
+        params = (category_filter,)
+    query += " ORDER BY end_date"
+
+    grants = [grant_with_balance(r) for r in db.execute(query, params)]
     for grant in grants:
         grid = grant_allocation_grid(grant["id"], None)
         grant["projected_personnel_cents"] = grid["total_cost"] if grid else 0
+        grant["spending_risk"] = grant_spending_risk(grant, grid)
     students = db.execute(
         """SELECT students.*, departments.name AS department_name FROM students
            LEFT JOIN departments ON departments.id = students.department_id
@@ -411,7 +513,12 @@ def index():
     ).fetchall()
     departments = db.execute("SELECT * FROM departments ORDER BY name").fetchall()
     return render_template(
-        "index.html", grants=grants, students=students, departments=departments, today=date.today().isoformat()
+        "index.html",
+        grants=grants,
+        students=students,
+        departments=departments,
+        today=date.today().isoformat(),
+        category_filter=category_filter,
     )
 
 
@@ -422,6 +529,7 @@ def add_grant():
     start_date = parse_date(request.form.get("start_date", ""))
     end_date = parse_date(request.form.get("end_date", ""))
     overhead_rate_bps = parse_rate(request.form.get("overhead_rate", "0") or "0")
+    category = parse_category(request.form.get("category", "sponsored"))
 
     if not name:
         flash("Grant name is required.")
@@ -433,10 +541,12 @@ def add_grant():
         flash("End date can't be before the start date.")
     elif overhead_rate_bps is None:
         flash("Overhead rate must be a non-negative number.")
+    elif category is None:
+        flash("Category must be sponsored, gift, or internal.")
     else:
         get_db().execute(
-            """INSERT INTO grants (name, sponsor, total_amount_cents, start_date, end_date, overhead_rate_bps, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO grants (name, sponsor, total_amount_cents, start_date, end_date, overhead_rate_bps,
+               category, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 request.form.get("sponsor", "").strip(),
@@ -444,6 +554,7 @@ def add_grant():
                 start_date.isoformat(),
                 end_date.isoformat(),
                 overhead_rate_bps,
+                category,
                 request.form.get("notes", "").strip(),
             ),
         )
@@ -470,9 +581,12 @@ def grant_detail(grant_id):
     live_cost_cents = live_grid["total_cost"] if live_grid else 0
     scenario_cost_cents = grid["total_cost"] if (grid and scenario_id is not None) else None
 
+    grant = grant_with_balance(row)
+    grant["spending_risk"] = grant_spending_risk(grant, live_grid)
+
     return render_template(
         "grant_detail.html",
-        grant=grant_with_balance(row),
+        grant=grant,
         transactions=transactions,
         grid=grid,
         students=students,
@@ -491,6 +605,7 @@ def edit_grant(grant_id):
     start_date = parse_date(request.form.get("start_date", ""))
     end_date = parse_date(request.form.get("end_date", ""))
     overhead_rate_bps = parse_rate(request.form.get("overhead_rate", "0") or "0")
+    category = parse_category(request.form.get("category", "sponsored"))
 
     if not name:
         flash("Grant name is required.")
@@ -502,10 +617,12 @@ def edit_grant(grant_id):
         flash("End date can't be before the start date.")
     elif overhead_rate_bps is None:
         flash("Overhead rate must be a non-negative number.")
+    elif category is None:
+        flash("Category must be sponsored, gift, or internal.")
     else:
         get_db().execute(
-            """UPDATE grants SET name = ?, sponsor = ?, total_amount_cents = ?,
-               start_date = ?, end_date = ?, overhead_rate_bps = ?, notes = ? WHERE id = ?""",
+            """UPDATE grants SET name = ?, sponsor = ?, total_amount_cents = ?, start_date = ?, end_date = ?,
+               overhead_rate_bps = ?, category = ?, notes = ? WHERE id = ?""",
             (
                 name,
                 request.form.get("sponsor", "").strip(),
@@ -513,6 +630,7 @@ def edit_grant(grant_id):
                 start_date.isoformat(),
                 end_date.isoformat(),
                 overhead_rate_bps,
+                category,
                 request.form.get("notes", "").strip(),
                 grant_id,
             ),

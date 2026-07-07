@@ -29,12 +29,22 @@ scenarios), ideally against `seed_demo.py` data.
 - **`data/*.db`** — one SQLite file per faculty member. Never shared across faculty;
   switching faculty in the UI just repoints the session at a different file. These
   files (except the two demo ones under version control via `seed_demo.py`) are
-  real user data — don't delete or overwrite them without asking.
+  real user data — don't delete or overwrite them without asking. **Never test writes
+  (curl/sqlite3/script) against a real faculty `.db` directly** — use the demo
+  databases (`seed_demo.py`) for that, or copy a real file aside first. `data/` is
+  entirely gitignored, so nothing here is recoverable from git if it's overwritten.
+  `backup_before_write()` in `app.py` snapshots a faculty db to
+  `data/<slug>.db.bak-YYYYMMDD` before its first POST of the day — a same-day rollback
+  net, not a substitute for care (see the safety-net comment in that function for why
+  it exists).
 
 ## Data model
 
 - `grants` — one row per award. Carries its own `overhead_rate_bps` (F&A rate; varies
-  by sponsor, not department).
+  by sponsor, not department). `category` (`'sponsored'`, `'gift'`, or `'internal'`,
+  validated by `parse_category()`/`GRANT_CATEGORIES`) drives the dashboard's toggle
+  filter (`?category=` query param on `/`) — purely a classification, doesn't affect
+  cost math.
 - `departments` — per-department **default** billing rates: `stipend_cents_per_month`,
   `tuition_cents_per_month`, `fringe_rate_bps`. The stipend is a default only — see
   below.
@@ -73,6 +83,19 @@ months is zero. A month that only partially overlaps the window (they start or g
 mid-month) is still charged in full — monthly granularity, no proration. Templates shade
 those months/cells with the `.post-grad` CSS class so the cutoff is visible, not just
 silently absent from the totals.
+
+### Spending risk
+
+`grant_spending_risk(grant, grid)` in `app.py` flags a non-expired grant as
+`'overspending'`, `'underspending'`, or `None` (on track). It extrapolates
+`current_monthly_burn_cents(grid)` — the projected personnel cost for this calendar
+month (or the nearest future month with an allocation, or 0 if none) — across the
+grant's remaining months to its end date, and compares that projection to the grant's
+remaining (unspent) `balance_cents`. `GRANT_OVERSPEND_RATIO` (1.15) and
+`GRANT_UNDERSPEND_RATIO` (0.6) are the tunable thresholds — adjust them if the flag is
+too noisy/quiet for your grants. This only looks at *projected personnel cost*, not
+other recorded transaction categories (equipment, travel, etc.), so a grant with heavy
+non-personnel spending won't necessarily be flagged even if it's genuinely at risk.
 
 ### Schema migrations
 

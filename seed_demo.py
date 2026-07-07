@@ -32,11 +32,13 @@ def insert_department(db, name, stipend_dollars, tuition_dollars, fringe_rate_pe
     return cur.lastrowid
 
 
-def insert_grant(db, name, sponsor, total_dollars, overhead_rate_percent, start_date, end_date, notes=""):
+def insert_grant(db, name, sponsor, total_dollars, overhead_rate_percent, start_date, end_date,
+                  category="sponsored", notes=""):
     cur = db.execute(
-        """INSERT INTO grants (name, sponsor, total_amount_cents, start_date, end_date, overhead_rate_bps, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (name, sponsor, round(total_dollars * 100), start_date, end_date, round(overhead_rate_percent * 100), notes),
+        """INSERT INTO grants (name, sponsor, total_amount_cents, start_date, end_date, overhead_rate_bps,
+           category, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (name, sponsor, round(total_dollars * 100), start_date, end_date, round(overhead_rate_percent * 100),
+         category, notes),
     )
     return cur.lastrowid
 
@@ -88,10 +90,20 @@ def seed_maria_santos():
     bio = insert_department(db, "Biology", stipend_dollars=3400, tuition_dollars=1100, fringe_rate_percent=32)
     me = insert_department(db, "Mechanical Engineering", stipend_dollars=3900, tuition_dollars=1300, fringe_rate_percent=30)
 
-    nsf = insert_grant(db, "NSF CAREER Award", "NSF", 500_000, 52, "2024-09-01", "2027-08-31")
-    nih = insert_grant(db, "NIH R01 - Cancer Genomics", "NIH", 750_000, 61, "2023-04-01", "2026-08-15")
-    doe = insert_grant(db, "DOE Early Career Award", "DOE", 400_000, 15, "2025-01-01", "2026-03-31")
-    sloan = insert_grant(db, "Sloan Research Fellowship", "Alfred P. Sloan Foundation", 75_000, 0, "2025-09-01", "2027-08-31")
+    nsf = insert_grant(db, "NSF CAREER Award", "NSF", 500_000, 52, "2024-09-01", "2027-08-31", category="sponsored")
+    nih = insert_grant(db, "NIH R01 - Cancer Genomics", "NIH", 750_000, 61, "2023-04-01", "2026-08-15", category="sponsored")
+    doe = insert_grant(db, "DOE Early Career Award", "DOE", 400_000, 15, "2025-01-01", "2026-03-31", category="sponsored")
+    sloan = insert_grant(db, "Sloan Research Fellowship", "Alfred P. Sloan Foundation", 75_000, 0, "2025-09-01",
+                          "2027-08-31", category="gift")
+    # Internal seed funding with no allocations against it -- burn rate is 0, so it
+    # demonstrates the "underspending" risk flag even though its balance is untouched.
+    insert_grant(db, "Departmental Bridge Funding", "ECE Department", 20_000, 0, "2026-01-01",
+                 "2026-12-31", category="internal")
+    # Small fund ending soon with a real allocation against it -- demonstrates the
+    # "overspending" risk flag (current burn rate would exceed the remaining balance
+    # before the fund's end date).
+    summer_ta = insert_grant(db, "Summer TA Support", "ECE Department", 6_000, 30, "2026-06-01",
+                              "2026-08-31", category="internal")
 
     chen = insert_student(db, "Maria Chen", "mchen@university.edu", cs, 3800, start_date="2023-09-01")
     # Starts mid-scenario, to demo that no personnel cost is projected before this date even
@@ -113,6 +125,7 @@ def seed_maria_santos():
     insert_allocation(db, None, nair, sloan, "2026-02", "2026-07", 50)
     insert_allocation(db, None, wilson, sloan, "2026-01", "2026-06", 100)
     insert_allocation(db, None, tanaka, nih, "2026-01", "2026-07", 30)
+    insert_allocation(db, None, wilson, summer_ta, "2026-07", "2026-08", 50)
 
     insert_transaction(db, nsf, "2025-11-15", 45_000, "Lab equipment - confocal microscope")
     insert_transaction(db, nsf, "2026-04-02", 2_200, "Conference travel - M. Chen (SPIE)")
@@ -148,8 +161,10 @@ def seed_alex_rivera():
 
     physics = insert_department(db, "Physics", stipend_dollars=3600, tuition_dollars=1150, fringe_rate_percent=29)
 
-    nsf_physics = insert_grant(db, "NSF Physics Frontiers", "NSF", 300_000, 48, "2025-06-01", "2028-05-31")
-    templeton = insert_grant(db, "Templeton Foundation Grant", "John Templeton Foundation", 120_000, 10, "2024-01-01", "2026-06-30")
+    nsf_physics = insert_grant(db, "NSF Physics Frontiers", "NSF", 300_000, 48, "2025-06-01", "2028-05-31",
+                                category="sponsored")
+    templeton = insert_grant(db, "Templeton Foundation Grant", "John Templeton Foundation", 120_000, 10,
+                              "2024-01-01", "2026-06-30", category="gift")
 
     petrov = insert_student(db, "Elena Petrov", "epetrov@university.edu", physics, 3700, start_date="2023-09-01")
     webb = insert_student(db, "Marcus Webb", "mwebb@university.edu", physics, 3500, role="postdoc",

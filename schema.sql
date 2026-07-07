@@ -7,6 +7,9 @@ CREATE TABLE grants (
     end_date TEXT NOT NULL,
     -- Negotiated F&A/indirect cost rate for this grant, in basis points (100 = 1%).
     overhead_rate_bps INTEGER NOT NULL DEFAULT 0,
+    -- 'sponsored' (external award, typically carries F&A), 'gift', or 'internal'
+    -- (departmental/discretionary funds). See GRANT_CATEGORIES in app.py.
+    category TEXT NOT NULL DEFAULT 'sponsored',
     notes TEXT
 );
 

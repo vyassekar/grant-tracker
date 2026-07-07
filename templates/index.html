@@ -4,23 +4,31 @@
 
 <section>
   <h1>Grants</h1>
+  <div class="toggle-bar">
+    <a href="{{ url_for('index') }}" class="toggle {{ 'active' if not category_filter }}">All</a>
+    <a href="{{ url_for('index', category='sponsored') }}" class="toggle {{ 'active' if category_filter == 'sponsored' }}">Sponsored</a>
+    <a href="{{ url_for('index', category='gift') }}" class="toggle {{ 'active' if category_filter == 'gift' }}">Gift</a>
+    <a href="{{ url_for('index', category='internal') }}" class="toggle {{ 'active' if category_filter == 'internal' }}">Internal</a>
+  </div>
   <table>
     <thead>
-      <tr><th>Name</th><th>Sponsor</th><th>Balance</th><th>Overhead</th><th>Projected personnel</th><th>End date</th><th>Status</th></tr>
+      <tr><th>Name</th><th>Category</th><th>Sponsor</th><th>Balance</th><th>Overhead</th><th>Projected personnel</th><th>End date</th><th>Status</th><th>Risk</th></tr>
     </thead>
     <tbody>
       {% for grant in grants %}
       <tr>
         <td><a href="{{ url_for('grant_detail', grant_id=grant.id) }}">{{ grant.name }}</a></td>
+        <td><span class="badge badge-category-{{ grant.category }}">{{ grant.category | capitalize }}</span></td>
         <td>{{ grant.sponsor }}</td>
         <td>${{ grant.balance_cents | money }} / ${{ grant.total_amount_cents | money }}</td>
         <td>{{ grant.overhead_rate_bps | rate }}%</td>
         <td>${{ grant.projected_personnel_cents | money }}</td>
         <td>{{ grant.end_date }}</td>
         <td><span class="badge badge-{{ grant.status }}">{{ grant.status }}</span></td>
+        <td>{% if grant.spending_risk %}<span class="badge badge-risk-{{ grant.spending_risk }}">{{ grant.spending_risk | capitalize }}</span>{% endif %}</td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="empty">No grants yet.</td></tr>
+      <tr><td colspan="9" class="empty">No grants{{ " in this category" if category_filter else "" }}.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -29,6 +37,13 @@
     <summary>Add grant</summary>
     <form method="post" action="{{ url_for('add_grant') }}" class="form-grid">
       <label>Name <input name="name" required></label>
+      <label>Category
+        <select name="category">
+          <option value="sponsored">Sponsored</option>
+          <option value="gift">Gift</option>
+          <option value="internal">Internal</option>
+        </select>
+      </label>
       <label>Sponsor <input name="sponsor"></label>
       <label>Total amount <input name="total_amount" type="number" step="0.01" min="0" required></label>
       <label>Overhead / F&amp;A rate (%) <input name="overhead_rate" type="number" step="0.01" min="0" value="0"></label>
@@ -38,6 +53,11 @@
       <button type="submit">Add grant</button>
     </form>
   </details>
+  <p class="hint">
+    "Risk" flags grants whose current monthly personnel allocation, projected out to the end date, would
+    substantially overshoot or undershoot the remaining balance -- a heads-up to rebalance allocations or
+    spend down committed funds, not a hard rule.
+  </p>
 </section>
 
 <section>
