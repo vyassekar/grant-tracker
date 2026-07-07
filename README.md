@@ -3,10 +3,11 @@
 Local single-user webapp for tracking research grants, spending, and student
 allocations.
 
-**Demo video:** [demo/grant_tracker_demo.mp4](demo/grant_tracker_demo.mp4) — a ~20s
-walkthrough recorded against the seeded sample data (grant detail with a
-what-if scenario comparison, a student's multi-grant allocation grid,
-departments, scenarios, and switching faculty members).
+**Demo video:** [demo/grant_tracker_demo.mp4](demo/grant_tracker_demo.mp4) — a ~35s
+walkthrough recorded against the seeded sample data (grant category filtering and
+over/underspending risk flags, a grant detail with a what-if scenario comparison,
+department stipend auto-fill, a student's multi-grant allocation grid, departments,
+scenarios, and switching faculty members).
 
 - Track grant balances (recorded transactions) and expiration status.
 - Allocate students to grants by month and percent of effort — a student can

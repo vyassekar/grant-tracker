@@ -92,7 +92,51 @@ def run_walkthrough(page):
     page.set_viewport_size({"width": 1280, "height": 800})
 
     select_faculty(page, "Dr Maria Santos")
+    page.wait_for_timeout(2200)
+
+    # Grant category toggle filter: All -> Internal -> Sponsored -> back to All. The
+    # Internal view lands on a grant with a real overspending flag and one with an
+    # underspending flag, visible in the table without leaving the dashboard.
+    page.locator("a.toggle", has_text="Internal").click()
+    page.wait_for_load_state("networkidle")
     page.wait_for_timeout(1800)
+    page.locator("a.toggle", has_text="Sponsored").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1400)
+    page.locator("a.toggle", has_text="All").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1000)
+
+    # Drill into the grant with the overspending flag to see the risk badge and
+    # explanation alongside its category badge on the detail page.
+    page.get_by_role("link", name="Summer TA Support").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(2400)
+
+    page.locator("a.back").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(600)
+
+    # Departments: default stipend column, alongside tuition/fringe.
+    page.get_by_role("link", name="Departments").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(2000)
+
+    page.locator("a.back").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(600)
+
+    # Add student form: picking a department auto-fills its default stipend --
+    # editable afterward, but this shows the fill firing live.
+    page.locator("details summary", has_text="Add student").click()
+    page.wait_for_timeout(500)
+    add_student_form = 'form[action*="students/add"]'
+    stipend_input = f"{add_student_form} input[name='stipend']"
+    page.locator(stipend_input).scroll_into_view_if_needed()
+    page.wait_for_timeout(400)
+    dept_value = option_value(page, f"{add_student_form} select[name='department_id']", "Mechanical Engineering")
+    set_field(page, f"{add_student_form} select[name='department_id']", dept_value)
+    page.wait_for_timeout(2200)
 
     page.get_by_role("link", name="NIH R01 - Cancer Genomics").click()
     page.wait_for_load_state("networkidle")
@@ -125,10 +169,6 @@ def run_walkthrough(page):
     page.get_by_role("link", name="Sloan Research Fellowship").click()
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(2800)
-
-    page.get_by_role("link", name="Departments").click()
-    page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(1800)
 
     select_faculty(page, "Dr Alex Rivera")
     page.wait_for_timeout(2000)
