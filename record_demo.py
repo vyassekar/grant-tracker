@@ -109,24 +109,24 @@ def run_walkthrough(page):
     page.locator(".theme-toggle").click()
     page.wait_for_timeout(600)
 
-    # Grant category toggle filter: All -> Internal -> Sponsored -> back to All. The
-    # Internal view lands on a grant with a real overspending flag and one with an
-    # underspending flag, visible in the table without leaving the dashboard.
+    # Grant category filter is multi-select: Internal alone, then also add Sponsored
+    # (both pills active at once, showing the union), then back to All.
     page.locator("a.toggle", has_text="Internal").click()
     page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(1600)
+    page.wait_for_timeout(1400)
     page.locator("a.toggle", has_text="Sponsored").click()
     page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(1200)
+    page.wait_for_timeout(1600)
     page.get_by_role("link", name="All", exact=True).click()
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(800)
 
-    # Hide-expired/overspent toggle: the expired DOE award drops out of view, then back.
+    # Hide-expired/overspent is a single toggle pill: on drops the expired DOE award
+    # out of view, clicking it again (same pill) turns it back off.
     page.locator("a.toggle", has_text="Hide expired/overspent").click()
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(1600)
-    page.get_by_role("link", name="All statuses", exact=True).click()
+    page.locator("a.toggle", has_text="Hide expired/overspent").click()
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(800)
 
