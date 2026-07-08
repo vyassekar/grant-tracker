@@ -176,3 +176,22 @@ Its data lives at `%APPDATA%\Grant Tracker\data\`. This build path has been
 verified to compile cleanly and bundle every required file (checked via CI), but
 hasn't yet been confirmed launching on real Windows hardware — see
 [`dist/README.md`](dist/README.md) for the current status of the committed build.
+
+### Optional: record a desktop-app demo video
+
+The demo video at the top of this file is browser-driven (Playwright/Chromium
+against the regular dev server) — that approach doesn't work for the native
+`GrantTracker.app` window (pywebview's window is a real OS window, not something a
+browser-automation tool can attach to or capture). Instead:
+
+```
+python record_desktop_demo.py
+```
+
+This reseeds demo data, finds your Mac's screen-capture device, launches
+`GrantTracker.app`, and walks you through a ~90s recording (it prints a suggested
+click-through checklist) — actually clicking through the app is on you, since this
+part can't be automated. Needs `ffmpeg` and one-time Screen Recording permission
+for your terminal app (macOS will prompt). Writes
+`demo/grant_tracker_desktop_demo.mp4` — a separate file; it never touches the
+existing `demo/grant_tracker_demo.mp4`.
