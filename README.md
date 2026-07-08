@@ -102,15 +102,21 @@ walkthrough, and writes `demo/grant_tracker_demo.mp4` (falls back to a
 `.webm` if no `ffmpeg` is found on your system — install `ffmpeg` for a
 proper mp4).
 
-## Install as a standalone desktop app (macOS)
+## Install as a standalone desktop app (macOS / Windows)
 
-Instead of running a dev server and opening a browser tab, you can build Grant
-Tracker into a real `GrantTracker.app` that opens in its own window, with no
-terminal window to keep open. This still runs entirely on your machine — no data
-ever leaves it, there's no server to reach it from the network, and no account or
-internet connection is needed. It's a separate, self-contained data store from the
-dev-server flow above (see where its data lives, below) — the two don't share
-faculty databases automatically.
+Instead of running a dev server and opening a browser tab, you can run Grant
+Tracker as a real desktop app — `GrantTracker.app` on macOS, `GrantTracker.exe` on
+Windows — that opens in its own window, with no terminal window to keep open. This
+still runs entirely on your machine — no data ever leaves it, there's no server to
+reach it from the network, and no account or internet connection is needed. It's a
+separate, self-contained data store from the dev-server flow above (see where its
+data lives, below) — the two don't share faculty databases automatically.
+
+**Already-built, ready to run:** [`dist/`](dist/README.md) has a prebuilt copy of
+both — skip straight there if you just want to run the app, no Python needed. The
+steps below are for building it yourself instead (e.g. after changing the code).
+
+### macOS
 
 1. Follow the **Requirements** + first three lines of **Run** above to get a venv
    with `requirements.txt` installed, then also install the desktop-only
@@ -140,7 +146,33 @@ stops everything; nothing is left running in the background.
 To rebuild after changing the app's code, just re-run step 2 — `dist/` and `build/`
 are safe to delete and regenerate anytime, they're not where your data lives.
 
-(The same `GrantTracker.spec` also builds on Windows via
-`pyinstaller GrantTracker.spec`, producing a `dist/GrantTracker/` folder with
-`GrantTracker.exe` inside — see `.github/workflows/build-desktop.yml` for the
-automated build; this hasn't yet been confirmed running on real Windows hardware.)
+### Windows
+
+Same `GrantTracker.spec`, built the same way, but needs to run on an actual Windows
+machine (PyInstaller doesn't cross-compile) — either your own, or via
+`.github/workflows/build-desktop.yml` on a GitHub Actions `windows-latest` runner
+(Actions tab → "Build desktop app" → "Run workflow", then download the
+`GrantTracker-Windows` artifact).
+
+1. On Windows, with a venv set up the same way as **Requirements** + **Run**
+   describe (`venv\Scripts\activate` instead of `source venv/bin/activate`):
+   ```
+   pip install -r requirements.txt
+   pip install -r requirements-desktop.txt
+   pyinstaller GrantTracker.spec --noconfirm
+   ```
+   This produces `dist/GrantTracker/GrantTracker.exe` plus its `_internal/` folder
+   — copy the whole `dist/GrantTracker/` folder wherever you want to run it from;
+   the `.exe` needs `_internal/` next to it.
+2. Double-click `GrantTracker.exe`.
+3. **First launch only:** this build is unsigned (no code-signing certificate), so
+   Windows SmartScreen will likely show an "unrecognized app" warning. Click
+   **More info**, then **Run anyway**. You only need to do this once.
+4. Needs the Microsoft Edge WebView2 runtime, which ships by default on Windows
+   11 and most updated Windows 10 installs; Windows will prompt to install it
+   automatically if it's genuinely missing.
+
+Its data lives at `%APPDATA%\Grant Tracker\data\`. This build path has been
+verified to compile cleanly and bundle every required file (checked via CI), but
+hasn't yet been confirmed launching on real Windows hardware — see
+[`dist/README.md`](dist/README.md) for the current status of the committed build.
