@@ -4,8 +4,10 @@ import shutil
 import sqlite3
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from io import BytesIO
 from pathlib import Path
 
+import openpyxl
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 
 BASE_DIR = Path(__file__).parent
@@ -13,12 +15,6 @@ DATA_DIR = BASE_DIR / "data"
 SCHEMA_PATH = BASE_DIR / "schema.sql"
 EXPIRING_SOON_DAYS = 60
 GRANT_CATEGORIES = {"sponsored", "gift", "internal"}
-# A grant's projected burn rate (current monthly personnel cost x months left until its
-# end date) vs. its remaining balance flags a spending risk outside these ratios. Tuned
-# to avoid noise from small month-to-month allocation changes; adjust if that's too
-# sensitive/insensitive for your grants.
-GRANT_OVERSPEND_RATIO = 1.15
-GRANT_UNDERSPEND_RATIO = 0.6
 
 app = Flask(__name__)
 # Only used to sign session/flash cookies for this local, single-user tool (no
@@ -74,6 +70,8 @@ def migrate_db(db):
     department_cols = {row["name"] for row in db.execute("PRAGMA table_info(departments)")}
     if "stipend_cents_per_month" not in department_cols:
         db.execute("ALTER TABLE departments ADD COLUMN stipend_cents_per_month INTEGER NOT NULL DEFAULT 0")
+    if "tuition_charged_in_summer" not in department_cols:
+        db.execute("ALTER TABLE departments ADD COLUMN tuition_charged_in_summer INTEGER NOT NULL DEFAULT 1")
     student_cols = {row["name"] for row in db.execute("PRAGMA table_info(students)")}
     if "expected_graduation" not in student_cols:
         db.execute("ALTER TABLE students ADD COLUMN expected_graduation TEXT")
@@ -84,6 +82,16 @@ def migrate_db(db):
     grant_cols = {row["name"] for row in db.execute("PRAGMA table_info(grants)")}
     if "category" not in grant_cols:
         db.execute("ALTER TABLE grants ADD COLUMN category TEXT NOT NULL DEFAULT 'sponsored'")
+    has_settings = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings'").fetchone()
+    if not has_settings:
+        db.execute(
+            """CREATE TABLE settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                overspend_ratio_bps INTEGER NOT NULL DEFAULT 11500,
+                underspend_ratio_bps INTEGER NOT NULL DEFAULT 6000
+            )"""
+        )
+        db.execute("INSERT INTO settings (id, overspend_ratio_bps, underspend_ratio_bps) VALUES (1, 11500, 6000)")
     db.commit()
 
 
@@ -216,6 +224,10 @@ def month_end(month_start):
     return date(month_start.year, month_start.month, last_day)
 
 
+def is_summer_month(month_str):
+    return int(month_str.split("-")[1]) in (6, 7, 8)
+
+
 def parse_scenario_arg(raw):
     try:
         return int(raw)
@@ -307,13 +319,19 @@ def current_monthly_burn_cents(grid):
     return 0
 
 
-def grant_spending_risk(grant, grid):
+def get_settings(db):
+    return dict(db.execute("SELECT overspend_ratio_bps, underspend_ratio_bps FROM settings WHERE id = 1").fetchone())
+
+
+def grant_spending_risk(grant, grid, overspend_ratio_bps, underspend_ratio_bps):
     """'overspending', 'underspending', or None (on track / not evaluated).
 
     Extrapolates the grant's current monthly personnel burn rate (see
     current_monthly_burn_cents) across its remaining months and compares that
     projection to its remaining (unspent) balance. Only evaluated for non-expired
-    grants -- an expired grant's spending is done, not "at risk".
+    grants -- an expired grant's spending is done, not "at risk". The thresholds
+    are user-tunable (see the Settings page / get_settings) rather than fixed
+    constants, since how sensitive this should be varies by grant portfolio.
     """
     if grant["status"] == "expired":
         return None
@@ -331,9 +349,9 @@ def grant_spending_risk(grant, grid):
     projected_remaining_spend = burn_rate * months_remaining
 
     ratio = projected_remaining_spend / balance
-    if ratio > GRANT_OVERSPEND_RATIO:
+    if ratio > overspend_ratio_bps / 10000:
         return "overspending"
-    if ratio < GRANT_UNDERSPEND_RATIO:
+    if ratio < underspend_ratio_bps / 10000:
         return "underspending"
     return None
 
@@ -352,7 +370,8 @@ def grant_allocation_grid(grant_id, scenario_id):
                    students.name AS student_name, students.stipend_cents_per_month,
                    students.start_date, students.expected_graduation,
                    COALESCE(departments.tuition_cents_per_month, 0) AS tuition_cents_per_month,
-                   COALESCE(departments.fringe_rate_bps, 0) AS fringe_rate_bps
+                   COALESCE(departments.fringe_rate_bps, 0) AS fringe_rate_bps,
+                   COALESCE(departments.tuition_charged_in_summer, 1) AS tuition_charged_in_summer
             FROM allocations
             JOIN students ON students.id = allocations.student_id
             LEFT JOIN departments ON departments.id = students.department_id
@@ -397,8 +416,11 @@ def grant_allocation_grid(grant_id, scenario_id):
     total_breakdown = empty_cost_breakdown()
     for r in rows:
         if is_chargeable(r["month"], r["start_date"], r["expected_graduation"]):
+            tuition_cents = r["tuition_cents_per_month"]
+            if not r["tuition_charged_in_summer"] and is_summer_month(r["month"]):
+                tuition_cents = 0
             cost = allocation_cost_cents(
-                r["stipend_cents_per_month"], r["tuition_cents_per_month"], r["fringe_rate_bps"], overhead_rate_bps, r["percent"]
+                r["stipend_cents_per_month"], tuition_cents, r["fringe_rate_bps"], overhead_rate_bps, r["percent"]
             )
         else:
             cost = empty_cost_breakdown()
@@ -422,7 +444,8 @@ def student_allocation_grid(student_id, scenario_id):
     student_row = db.execute(
         """SELECT students.stipend_cents_per_month, students.start_date, students.expected_graduation,
                   COALESCE(departments.tuition_cents_per_month, 0) AS tuition_cents_per_month,
-                  COALESCE(departments.fringe_rate_bps, 0) AS fringe_rate_bps
+                  COALESCE(departments.fringe_rate_bps, 0) AS fringe_rate_bps,
+                  COALESCE(departments.tuition_charged_in_summer, 1) AS tuition_charged_in_summer
            FROM students LEFT JOIN departments ON departments.id = students.department_id
            WHERE students.id = ?""",
         (student_id,),
@@ -466,9 +489,12 @@ def student_allocation_grid(student_id, scenario_id):
     total_breakdown = empty_cost_breakdown()
     for r in rows:
         if is_chargeable(r["month"], student_row["start_date"], student_row["expected_graduation"]):
+            tuition_cents = student_row["tuition_cents_per_month"]
+            if not student_row["tuition_charged_in_summer"] and is_summer_month(r["month"]):
+                tuition_cents = 0
             cost = allocation_cost_cents(
                 student_row["stipend_cents_per_month"],
-                student_row["tuition_cents_per_month"],
+                tuition_cents,
                 student_row["fringe_rate_bps"],
                 r["overhead_rate_bps"],
                 r["percent"],
@@ -485,6 +511,197 @@ def student_allocation_grid(student_id, scenario_id):
         "totals": totals,
         "breakdown": total_breakdown,
     }
+
+
+def under_allocated_months(grid):
+    """[(month_label, total_percent), ...] for chargeable months in a student_allocation_grid
+    result where the allocated total is under 100%. [] if grid is None (nothing allocated) or
+    nothing's under. Used to flag students who aren't fully committed for some month."""
+    if not grid:
+        return []
+    return [
+        (grid["month_labels"][i], total)
+        for i, total in enumerate(grid["totals"])
+        if grid["months_chargeable"][i] and total < 100
+    ]
+
+
+# --- "Plan a new hire" capacity report (see plan_new_student()) ---------------------
+
+
+def grant_spare_capacity_cents(grant, months):
+    """Grant's remaining balance minus its already-committed (live) projected personnel
+    cost for `months`. Does NOT reserve any balance for commitments outside `months` --
+    a grant heavily committed just past the window's edge can still show its full
+    uncommitted balance as spare here."""
+    grid = grant_allocation_grid(grant["id"], None)
+    committed_by_month = dict(zip(grid["months"], grid["monthly_costs"])) if grid else {}
+    committed = sum(committed_by_month.get(m, 0) for m in months)
+    return grant["balance_cents"] - committed
+
+
+def eligible_grants_for_window(db, months):
+    """(eligible, excluded) grants for a capacity-planning window. `eligible` is
+    non-expired grants whose [start_date, end_date] fully covers the window and that
+    still have positive spare_cents left in it (each gets a "spare_cents" key added).
+    `excluded` is [(grant, reason), ...] for everything else, for a transparency panel."""
+    window_start = parse_month(months[0])
+    window_end_date = month_end(parse_month(months[-1]))
+    eligible, excluded = [], []
+    for row in db.execute("SELECT * FROM grants ORDER BY name"):
+        grant = grant_with_balance(row)
+        if grant["status"] == "expired":
+            excluded.append((grant, "expired"))
+            continue
+        if date.fromisoformat(grant["start_date"]) > window_start or date.fromisoformat(grant["end_date"]) < window_end_date:
+            excluded.append((grant, "doesn't cover the full window"))
+            continue
+        spare_cents = grant_spare_capacity_cents(grant, months)
+        if spare_cents <= 0:
+            excluded.append((grant, "no spare capacity left in this window"))
+            continue
+        grant["spare_cents"] = spare_cents
+        eligible.append(grant)
+    return eligible, excluded
+
+
+def hire_window_cost_cents(department, overhead_rate_bps, months):
+    """([cost_cents_per_month, ...], total) for one hypothetical 100%-effort hire from
+    `department`, funded by a grant with `overhead_rate_bps`, across `months`. Applies
+    the summer-tuition-exclusion rule the same way the live grids do."""
+    monthly = []
+    for m in months:
+        tuition_cents = department["tuition_cents_per_month"]
+        if not department["tuition_charged_in_summer"] and is_summer_month(m):
+            tuition_cents = 0
+        cost = allocation_cost_cents(
+            department["stipend_cents_per_month"], tuition_cents, department["fringe_rate_bps"], overhead_rate_bps, 100
+        )
+        monthly.append(cost["total"])
+    return monthly, sum(monthly)
+
+
+def available_percent(spare_cents_remaining, window_cost_100pct_cents):
+    """How much % of one hypothetical 100%-effort hire's window cost the remaining spare
+    dollars could still fund, clamped to [0, 100]. A zero-cost hire (e.g. all-zero
+    department rates) is trivially 100% fundable rather than a division by zero."""
+    if window_cost_100pct_cents <= 0:
+        return 100
+    return max(0, min(100, int(spare_cents_remaining * 100 // window_cost_100pct_cents)))
+
+
+def _new_hire_result(department, role, assignments, placed_pct, months):
+    window_cost_cents = sum(a["window_cost_cents"] for a in assignments)
+    return {
+        "department_name": department["name"],
+        "role": role,
+        "assignments": assignments,
+        "placed_pct": placed_pct,
+        "feasible": placed_pct >= 100,
+        "window_cost_cents": window_cost_cents,
+        "monthly_cost_cents": window_cost_cents / len(months) if months else 0,
+    }
+
+
+def _new_hire_plan_result(name, description, hire_results):
+    fully_placed = sum(1 for h in hire_results if h["feasible"])
+    return {
+        "name": name,
+        "description": description,
+        "hires": hire_results,
+        "fully_placed_count": fully_placed,
+        "requested_count": len(hire_results),
+        "feasible": fully_placed == len(hire_results),
+        "total_cost_cents": sum(h["window_cost_cents"] for h in hire_results),
+    }
+
+
+def build_greedy_hire_plan(name, description, hires, grant_order, months):
+    """Fills each hire's 100% need by walking `grant_order` (already sorted by the
+    caller -- most-spare-first for "Concentrate", soonest-expiring-first for "Use it or
+    lose it") and draining a shared spare_remaining pool per grant. Because the pool
+    persists across hires against one fixed order, a grant is naturally exhausted before
+    later hires spill onto the next grant in the order -- no special-casing needed."""
+    spare_remaining = {g["id"]: float(g["spare_cents"]) for g in grant_order}
+    cost_cache = {}
+    hire_results = []
+    for hire in hires:
+        dept = hire["department"]
+        remaining_need = 100
+        assignments = []
+        for grant in grant_order:
+            if remaining_need <= 0:
+                break
+            key = (grant["id"], dept["id"])
+            if key not in cost_cache:
+                cost_cache[key] = hire_window_cost_cents(dept, grant["overhead_rate_bps"], months)
+            _, cost100 = cost_cache[key]
+            take_pct = min(remaining_need, available_percent(spare_remaining[grant["id"]], cost100))
+            if take_pct <= 0:
+                continue
+            cost_for_take = cost100 * take_pct / 100
+            spare_remaining[grant["id"]] -= cost_for_take
+            remaining_need -= take_pct
+            assignments.append(
+                {"grant_id": grant["id"], "grant_name": grant["name"], "percent": take_pct, "window_cost_cents": cost_for_take}
+            )
+        hire_results.append(_new_hire_result(dept, hire["role"], assignments, 100 - remaining_need, months))
+    return _new_hire_plan_result(name, description, hire_results)
+
+
+def build_spread_hire_plan(hires, grants, months):
+    """For each hire (in submitted order), splits its 100% need proportionally across
+    every grant with remaining spare capacity, using largest-remainder rounding so
+    per-grant percentages are integers that sum exactly to the feasible total. Recomputed
+    fresh per hire against the shared remaining pool, so later hires reflect what earlier
+    ones already consumed."""
+    spare_remaining = {g["id"]: float(g["spare_cents"]) for g in grants}
+    cost_cache = {}
+    hire_results = []
+    for hire in hires:
+        dept = hire["department"]
+        candidates = []
+        for grant in grants:
+            if spare_remaining[grant["id"]] <= 0:
+                continue
+            key = (grant["id"], dept["id"])
+            if key not in cost_cache:
+                cost_cache[key] = hire_window_cost_cents(dept, grant["overhead_rate_bps"], months)
+            _, cost100 = cost_cache[key]
+            avail_pct = available_percent(spare_remaining[grant["id"]], cost100)
+            if avail_pct > 0:
+                candidates.append((grant, avail_pct, cost100))
+
+        total_avail = sum(avail_pct for _, avail_pct, _ in candidates)
+        if total_avail == 0:
+            hire_results.append(_new_hire_result(dept, hire["role"], [], 0, months))
+            continue
+
+        target_total = min(100, total_avail)
+        raw = [(grant, cost100, target_total * avail_pct / total_avail) for grant, avail_pct, cost100 in candidates]
+        floors = [(grant, cost100, int(t), t - int(t)) for grant, cost100, t in raw]
+        assigned_sum = sum(f for _, _, f, _ in floors)
+        remainder_needed = target_total - assigned_sum
+        floors.sort(key=lambda row: -row[3])
+
+        assignments = []
+        for i, (grant, cost100, f, _frac) in enumerate(floors):
+            pct = f + (1 if i < remainder_needed else 0)
+            if pct <= 0:
+                continue
+            cost_for_take = cost100 * pct / 100
+            spare_remaining[grant["id"]] -= cost_for_take
+            assignments.append(
+                {"grant_id": grant["id"], "grant_name": grant["name"], "percent": pct, "window_cost_cents": cost_for_take}
+            )
+        placed_pct = sum(a["percent"] for a in assignments)
+        hire_results.append(_new_hire_result(dept, hire["role"], assignments, placed_pct, months))
+
+    return _new_hire_plan_result(
+        "Spread evenly",
+        "Splits each hire's effort proportionally across every grant with remaining spare capacity.",
+        hire_results,
+    )
 
 
 @app.route("/")
@@ -504,16 +721,25 @@ def index():
     grants = [grant_with_balance(r) for r in db.execute(query, params)]
     if hide_closed:
         grants = [g for g in grants if g["status"] != "expired" and g["balance_cents"] >= 0]
+    settings = get_settings(db)
     for grant in grants:
         grid = grant_allocation_grid(grant["id"], None)
         grant["projected_personnel_cents"] = grid["total_cost"] if grid else 0
-        grant["spending_risk"] = grant_spending_risk(grant, grid)
+        grant["spending_risk"] = grant_spending_risk(
+            grant, grid, settings["overspend_ratio_bps"], settings["underspend_ratio_bps"]
+        )
     students = db.execute(
         """SELECT students.*, departments.name AS department_name FROM students
            LEFT JOIN departments ON departments.id = students.department_id
            ORDER BY students.name"""
     ).fetchall()
     departments = db.execute("SELECT * FROM departments ORDER BY name").fetchall()
+    # Independent of the category/hide-closed filters above -- the "initial allocation"
+    # editor on the add-student form should offer every grant regardless of what the
+    # dashboard's grant table currently has filtered out.
+    all_grants_json = [
+        {"id": r["id"], "name": r["name"]} for r in db.execute("SELECT id, name FROM grants ORDER BY name")
+    ]
 
     # Each category pill's link toggles just that category in/out of the current
     # selection (keeping the others and hide_closed), so more than one can be active
@@ -538,6 +764,8 @@ def index():
         category_clear_url=category_clear_url,
         hide_closed=hide_closed,
         hide_closed_toggle_url=hide_closed_toggle_url,
+        grants_json=all_grants_json,
+        baseline_allocations_by_student={},
     )
 
 
@@ -600,8 +828,11 @@ def grant_detail(grant_id):
     live_cost_cents = live_grid["total_cost"] if live_grid else 0
     scenario_cost_cents = grid["total_cost"] if (grid and scenario_id is not None) else None
 
+    settings = get_settings(db)
     grant = grant_with_balance(row)
-    grant["spending_risk"] = grant_spending_risk(grant, live_grid)
+    grant["spending_risk"] = grant_spending_risk(
+        grant, live_grid, settings["overspend_ratio_bps"], settings["underspend_ratio_bps"]
+    )
 
     return render_template(
         "grant_detail.html",
@@ -761,7 +992,8 @@ def add_student():
     elif not graduation_ok:
         flash("Expected graduation must be a valid date.")
     else:
-        get_db().execute(
+        db = get_db()
+        cursor = db.execute(
             """INSERT INTO students (name, email, department_id, role, stipend_cents_per_month, start_date,
                expected_graduation, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
@@ -775,7 +1007,26 @@ def add_student():
                 request.form.get("notes", "").strip(),
             ),
         )
-        get_db().commit()
+        new_student_id = cursor.lastrowid
+
+        grant_ids = request.form.getlist("grant_id[]")
+        percents = request.form.getlist("percent[]")
+        rows = [(g, p) for g, p in zip(grant_ids, percents) if g]
+        if rows:
+            error = apply_allocation_batch(
+                db,
+                None,
+                new_student_id,
+                rows,
+                request.form.get("month_start", ""),
+                request.form.get("month_end", ""),
+            )
+            if error:
+                db.rollback()
+                flash(error)
+                return redirect(url_for("index"))
+
+        db.commit()
     return redirect(url_for("index"))
 
 
@@ -805,6 +1056,7 @@ def student_detail(student_id):
         scenarios=scenarios,
         current_scenario_id=scenario_id,
         grid=grid,
+        under_allocated=under_allocated_months(grid),
         today=date.today().isoformat(),
     )
 
@@ -1048,6 +1300,29 @@ def set_allocation():
     return redirect(redirect_target)
 
 
+@app.route("/settings")
+def settings_page():
+    return render_template("settings.html", settings=get_settings(get_db()))
+
+
+@app.route("/settings/update", methods=["POST"])
+def update_settings():
+    overspend_bps = parse_rate(request.form.get("overspend_ratio", ""))
+    underspend_bps = parse_rate(request.form.get("underspend_ratio", ""))
+
+    if overspend_bps is None or underspend_bps is None:
+        flash("Both thresholds must be non-negative percentages.")
+    elif underspend_bps >= overspend_bps:
+        flash("The underspending threshold must be lower than the overspending threshold.")
+    else:
+        get_db().execute(
+            "UPDATE settings SET overspend_ratio_bps = ?, underspend_ratio_bps = ? WHERE id = 1",
+            (overspend_bps, underspend_bps),
+        )
+        get_db().commit()
+    return redirect(url_for("settings_page"))
+
+
 @app.route("/departments")
 def departments_page():
     departments = get_db().execute("SELECT * FROM departments ORDER BY name").fetchall()
@@ -1060,6 +1335,7 @@ def add_department():
     stipend_cents = parse_money(request.form.get("stipend", "0") or "0")
     tuition_cents = parse_money(request.form.get("tuition", "0") or "0")
     fringe_rate_bps = parse_rate(request.form.get("fringe_rate", "0") or "0")
+    tuition_charged_in_summer = 1 if request.form.get("tuition_charged_in_summer") == "on" else 0
 
     if not name:
         flash("Department name is required.")
@@ -1071,8 +1347,9 @@ def add_department():
         flash("Fringe rate must be a non-negative number.")
     else:
         get_db().execute(
-            "INSERT INTO departments (name, stipend_cents_per_month, tuition_cents_per_month, fringe_rate_bps) VALUES (?, ?, ?, ?)",
-            (name, stipend_cents, tuition_cents, fringe_rate_bps),
+            """INSERT INTO departments (name, stipend_cents_per_month, tuition_cents_per_month, fringe_rate_bps,
+               tuition_charged_in_summer) VALUES (?, ?, ?, ?, ?)""",
+            (name, stipend_cents, tuition_cents, fringe_rate_bps, tuition_charged_in_summer),
         )
         get_db().commit()
     return redirect(url_for("departments_page"))
@@ -1084,6 +1361,7 @@ def edit_department(department_id):
     stipend_cents = parse_money(request.form.get("stipend", "0") or "0")
     tuition_cents = parse_money(request.form.get("tuition", "0") or "0")
     fringe_rate_bps = parse_rate(request.form.get("fringe_rate", "0") or "0")
+    tuition_charged_in_summer = 1 if request.form.get("tuition_charged_in_summer") == "on" else 0
 
     if not name:
         flash("Department name is required.")
@@ -1095,8 +1373,9 @@ def edit_department(department_id):
         flash("Fringe rate must be a non-negative number.")
     else:
         get_db().execute(
-            "UPDATE departments SET name = ?, stipend_cents_per_month = ?, tuition_cents_per_month = ?, fringe_rate_bps = ? WHERE id = ?",
-            (name, stipend_cents, tuition_cents, fringe_rate_bps, department_id),
+            """UPDATE departments SET name = ?, stipend_cents_per_month = ?, tuition_cents_per_month = ?,
+               fringe_rate_bps = ?, tuition_charged_in_summer = ? WHERE id = ?""",
+            (name, stipend_cents, tuition_cents, fringe_rate_bps, tuition_charged_in_summer, department_id),
         )
         get_db().commit()
     return redirect(url_for("departments_page"))
@@ -1130,6 +1409,89 @@ def scenarios_page():
         grants_json=grants_json,
         today=date.today().isoformat(),
         baseline_allocations_by_student=allocations_grouped_by_student(db, None),
+    )
+
+
+@app.route("/scenarios/plan-new-student")
+def plan_new_student():
+    """Read-only capacity report: given a time window and a set of hypothetical new
+    hires (by department + role), checks whether current grants have enough spare
+    balance to cover them and shows 2-3 candidate ways to split their effort. Doesn't
+    write anything -- no student, allocation, or scenario is created. GET (not POST)
+    since it's a pure query with no side effects.
+    """
+    db = get_db()
+    departments = db.execute("SELECT * FROM departments ORDER BY name").fetchall()
+
+    window_start_raw = request.args.get("window_start", "")
+    window_end_raw = request.args.get("window_end", "")
+    department_ids = request.args.getlist("department_id[]")
+    roles = request.args.getlist("role[]")
+    counts = request.args.getlist("count[]")
+
+    plans = None
+    excluded_grants = []
+    hire_rows_prefill = []
+    submitted = bool(window_start_raw or window_end_raw or department_ids)
+
+    if submitted:
+        window_start = parse_month(window_start_raw)
+        window_end = parse_month(window_end_raw)
+        if window_start is None or window_end is None:
+            flash("Start and end month must be valid.")
+        elif window_end < window_start:
+            flash("End month can't be before the start month.")
+        else:
+            months = month_range(window_start, window_end)
+            hires = []
+            for dept_id_raw, role_raw, count_raw in zip(department_ids, roles, counts):
+                dept_row = next((d for d in departments if d["id"] == parse_department_id(dept_id_raw)), None)
+                role = parse_role(role_raw)
+                try:
+                    count = int(count_raw)
+                except (TypeError, ValueError):
+                    count = 0
+                if dept_row is None:
+                    flash("Skipped a row: that department no longer exists.")
+                    continue
+                if role is None or count <= 0:
+                    continue
+                dept = dict(dept_row)
+                hire_rows_prefill.append({"department_id": dept["id"], "department_name": dept["name"], "role": role, "count": count})
+                hires.extend({"department": dept, "role": role} for _ in range(count))
+
+            if not hires:
+                flash("Add at least one department/role/count row.")
+            else:
+                eligible_grants, excluded_grants = eligible_grants_for_window(db, months)
+                plans = [
+                    build_greedy_hire_plan(
+                        "Concentrate",
+                        "Fills each grant to capacity, starting with the grant with the most spare capacity, before moving to the next.",
+                        hires,
+                        sorted(eligible_grants, key=lambda g: -g["spare_cents"]),
+                        months,
+                    ),
+                    build_greedy_hire_plan(
+                        "Use it or lose it",
+                        "Same as Concentrate, but prioritizes grants that expire soonest so their balance gets used before it's lost.",
+                        hires,
+                        sorted(eligible_grants, key=lambda g: g["end_date"]),
+                        months,
+                    ),
+                    build_spread_hire_plan(hires, eligible_grants, months),
+                ]
+
+    return render_template(
+        "plan_new_student.html",
+        departments=departments,
+        departments_json=[{"id": d["id"], "name": d["name"]} for d in departments],
+        window_start=window_start_raw,
+        window_end=window_end_raw,
+        hire_rows_prefill=hire_rows_prefill,
+        plans=plans,
+        excluded_grants=excluded_grants,
+        today=date.today().isoformat(),
     )
 
 
@@ -1201,6 +1563,7 @@ def scenario_detail(scenario_id):
                 "changed": student_id in changed_student_ids,
                 "live_cost_cents": live_grid["breakdown"]["total"] if live_grid else 0,
                 "scenario_cost_cents": scenario_grid["breakdown"]["total"] if scenario_grid else 0,
+                "under_allocated_count": len(under_allocated_months(scenario_grid)),
             }
         )
     student_rows.sort(key=lambda r: r["name"])
@@ -1320,8 +1683,65 @@ def add_faculty():
     else:
         init_db(faculty_db_path(slug))
         session["faculty_db"] = slug
+
+        workbook_file = request.files.get("workbook")
+        if workbook_file and workbook_file.filename:
+            import_grants_from_workbook(workbook_file)
+
         return redirect(url_for("index"))
     return redirect(url_for("faculty_page"))
+
+
+def import_grants_from_workbook(workbook_file):
+    """Best-effort import of active grants from an uploaded .xlsx report into the
+    just-created, currently-active faculty db (see add_faculty()). Reuses the same
+    header-detection/parsing logic as import_from_excel.py's CLI, with its default
+    options (today as as-of-date, 3-year start-date estimate, excludes expired
+    awards). Failures here are non-fatal -- the faculty db was already created and
+    stays around either way, flash() just tells the user what happened.
+    """
+    from import_from_excel import REPORT_REQUIRED_COLUMNS, build_grant_records, existing_ptas, find_header
+
+    try:
+        wb = openpyxl.load_workbook(BytesIO(workbook_file.read()), data_only=True, read_only=True)
+    except Exception:
+        flash("Couldn't read that file as an Excel workbook. The faculty database was still created.")
+        return
+
+    sheet_name, header_row, col = find_header(wb, REPORT_REQUIRED_COLUMNS)
+    if sheet_name is None:
+        flash(
+            "Couldn't find a matching report sheet in that workbook. The faculty database was still "
+            "created -- add grants by hand, or try importing again later from the Faculty page."
+        )
+        return
+
+    today = date.today()
+    records = build_grant_records(wb, sheet_name, col, today, include_expired=False, estimate_years=3)
+    db = get_db()
+    already = existing_ptas(db)
+    inserted = 0
+    for r in records:
+        if r["pta"] in already:
+            continue
+        cursor = db.execute(
+            """INSERT INTO grants (name, sponsor, total_amount_cents, start_date, end_date, overhead_rate_bps, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (r["name"], "", r["total_amount_cents"], r["start_date"], r["end_date"], 0, r["notes"]),
+        )
+        if r["spent_cents"]:
+            db.execute(
+                "INSERT INTO transactions (grant_id, date, amount_cents, description) VALUES (?, ?, ?, ?)",
+                (
+                    cursor.lastrowid,
+                    today.isoformat(),
+                    r["spent_cents"],
+                    f"Expenditures + encumbrances as of {today.isoformat()} (imported from {workbook_file.filename})",
+                ),
+            )
+        inserted += 1
+    db.commit()
+    flash(f"Imported {inserted} grant(s) from {workbook_file.filename}.")
 
 
 if __name__ == "__main__":

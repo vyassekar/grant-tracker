@@ -27,11 +27,17 @@
 
   <details {{ "open" if not faculty else "" }}>
     <summary>New faculty member</summary>
-    <form method="post" action="{{ url_for('add_faculty') }}" class="form-grid">
+    <form method="post" action="{{ url_for('add_faculty') }}" class="form-grid" enctype="multipart/form-data">
       <label>Name <input name="name" placeholder="e.g. Jane Smith" required></label>
+      <label>Import from Excel (optional) <input name="workbook" type="file" accept=".xlsx"></label>
       <button type="submit">Create database</button>
     </form>
-    <p class="hint">This creates a brand-new, empty database for this faculty member.</p>
+    <p class="hint">
+      This creates a brand-new database for this faculty member. If you attach a grant-report workbook
+      (.xlsx), active grants and their balances are imported automatically (using today's date, a 3-year
+      estimated start date for grants with no ledger history, and excluding already-expired awards) --
+      you can still add or edit grants by hand afterwards either way.
+    </p>
   </details>
 </section>
 

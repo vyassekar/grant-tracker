@@ -79,6 +79,8 @@ h2 { font-size: 1.1rem; margin: 0 0 0.75rem; color: var(--muted); }
 .meta { color: var(--muted); margin: 0 0 0.5rem; }
 .notes { font-style: italic; color: var(--muted); }
 .hint { color: var(--muted); font-size: 0.85rem; }
+.under-allocated-hint { color: #92400e; }
+:root[data-theme="dark"] .under-allocated-hint { color: #fbbf24; }
 .empty { color: var(--muted); font-style: italic; }
 .back { color: var(--muted); text-decoration: none; font-size: 0.9rem; }
 
@@ -126,6 +128,7 @@ a { color: var(--accent); }
 .badge-risk-underspending { background: #fef3c7; color: #92400e; }
 
 .badge-changed { background: #dbeafe; color: #1e40af; margin-left: 0.4rem; }
+.badge-underallocated { background: #fef3c7; color: #92400e; margin-left: 0.4rem; }
 
 .toggle-bar { display: flex; gap: 0.4rem; margin-bottom: 0.75rem; }
 
@@ -183,6 +186,23 @@ summary { cursor: pointer; font-weight: 600; color: var(--accent); }
 .form-grid button {
   grid-column: 1 / -1;
   justify-self: start;
+}
+
+.form-grid .form-section-title {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.form-grid label.checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  grid-column: 1 / -1;
+}
+
+.form-grid label.checkbox-label input[type="checkbox"] {
+  padding: 0;
+  width: auto;
 }
 
 .alloc-editor {

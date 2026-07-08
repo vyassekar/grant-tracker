@@ -25,10 +25,17 @@ def fresh_db(slug):
     return db, path
 
 
-def insert_department(db, name, stipend_dollars, tuition_dollars, fringe_rate_percent):
+def insert_department(db, name, stipend_dollars, tuition_dollars, fringe_rate_percent, tuition_charged_in_summer=True):
     cur = db.execute(
-        "INSERT INTO departments (name, stipend_cents_per_month, tuition_cents_per_month, fringe_rate_bps) VALUES (?, ?, ?, ?)",
-        (name, round(stipend_dollars * 100), round(tuition_dollars * 100), round(fringe_rate_percent * 100)),
+        """INSERT INTO departments (name, stipend_cents_per_month, tuition_cents_per_month, fringe_rate_bps,
+           tuition_charged_in_summer) VALUES (?, ?, ?, ?, ?)""",
+        (
+            name,
+            round(stipend_dollars * 100),
+            round(tuition_dollars * 100),
+            round(fringe_rate_percent * 100),
+            1 if tuition_charged_in_summer else 0,
+        ),
     )
     return cur.lastrowid
 

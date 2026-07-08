@@ -11,14 +11,17 @@ This reseeds the demo data (see seed_demo.py), launches the app on a scratch
 port, drives a short walkthrough in a real headless browser, and writes
 demo/grant_tracker_demo.mp4 (or .webm if ffmpeg isn't found anywhere).
 """
+import datetime
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
 
+import openpyxl
 from playwright.sync_api import sync_playwright
 
 import seed_demo
@@ -27,6 +30,19 @@ BASE_DIR = Path(__file__).parent
 DEMO_DIR = BASE_DIR / "demo"
 PORT = 5057
 BASE_URL = f"http://127.0.0.1:{PORT}"
+
+
+def build_demo_workbook(path):
+    """A tiny synthetic grant-report .xlsx (same shape import_from_excel.py /
+    the faculty-import route expect) purely for the walkthrough's Excel-import
+    beat -- not real grant data, just enough to show the import populating a
+    brand-new faculty's grants in one step."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Project Name", "PTA", "Award End Date", "Budget", "Balance"])
+    ws.append(["NSF Robotics Initiative", "PTA-9001", datetime.datetime(2028, 6, 30), 250_000, 180_000])
+    ws.append(["DARPA Autonomy Program", "PTA-9002", datetime.datetime(2027, 9, 30), 500_000, 410_000])
+    wb.save(path)
 
 
 def find_ffmpeg():
@@ -97,8 +113,11 @@ def set_alloc_row_percent(page, row_index, percent):
     )
 
 
-def run_walkthrough(page):
+def run_walkthrough(page, demo_workbook_path):
     page.set_viewport_size({"width": 1280, "height": 800})
+    # "Apply to live" / "Delete" buttons confirm() before submitting -- auto-accept
+    # every dialog so the walkthrough doesn't stall waiting on a native prompt.
+    page.on("dialog", lambda dialog: dialog.accept())
 
     select_faculty(page, "Dr Maria Santos")
     page.wait_for_timeout(2000)
@@ -140,17 +159,47 @@ def run_walkthrough(page):
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(600)
 
-    # Departments: default stipend column, alongside tuition/fringe.
-    page.get_by_role("link", name="Departments").click()
+    # Settings: the risk thresholds behind that overspending/underspending badge are
+    # a tunable knob, not a hardcoded constant -- tighten the overspending threshold
+    # and confirm it's saved.
+    page.locator("nav").get_by_role("link", name="Settings").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1200)
+    page.fill('input[name="overspend_ratio"]', "105")
+    page.fill('input[name="underspend_ratio"]', "55")
+    page.wait_for_timeout(600)
+    page.click('button:has-text("Save")')
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1400)
+
+    # Back to the dashboard to confirm the risk badges reflect the new thresholds
+    # immediately -- risk is always recomputed fresh, never cached.
+    page.get_by_role("link", name="Grant Tracker").click()
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(1800)
+
+    # Departments: default stipend column, alongside tuition/fringe. Toggle off
+    # summer tuition for Mechanical Engineering and save -- live edit, not just a
+    # static column.
+    page.get_by_role("link", name="Departments").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1400)
+    me_row = page.locator("tr", has_text="Mechanical Engineering")
+    me_row.locator("summary", has_text="Edit").click()
+    page.wait_for_timeout(500)
+    me_row.locator('input[name="tuition_charged_in_summer"]').uncheck()
+    page.wait_for_timeout(500)
+    me_row.locator('button:has-text("Save")').click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1600)
 
     page.locator("a.back").click()
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(600)
 
     # Add student form: picking a department auto-fills its default stipend --
-    # editable afterward, but this shows the fill firing live.
+    # editable afterward. Then use the same slider editor scenarios use to give the
+    # new student an initial split across two grants, and actually create them.
     page.locator("details summary", has_text="Add student").click()
     page.wait_for_timeout(500)
     add_student_form = 'form[action*="students/add"]'
@@ -159,6 +208,16 @@ def run_walkthrough(page):
     page.wait_for_timeout(400)
     dept_value = option_value(page, f"{add_student_form} select[name='department_id']", "Mechanical Engineering")
     set_field(page, f"{add_student_form} select[name='department_id']", dept_value)
+    page.wait_for_timeout(1800)
+    page.fill(f"{add_student_form} input[name='name']", "Devon Ellis")
+    page.locator(f"{add_student_form} #alloc-add-grant").scroll_into_view_if_needed()
+    page.select_option(f"{add_student_form} #alloc-add-grant", label="NSF CAREER Award")
+    page.locator(f"{add_student_form} button:has-text('+ Add grant')").click()
+    page.wait_for_timeout(400)
+    set_alloc_row_percent(page, 0, 60)
+    page.wait_for_timeout(1400)
+    page.locator(f"{add_student_form} button:has-text('Add student')").click()
+    page.wait_for_load_state("networkidle")
     page.wait_for_timeout(1800)
 
     # Scenarios: build a new what-if from scratch using the slider allocation editor.
@@ -198,22 +257,76 @@ def run_walkthrough(page):
     page.wait_for_timeout(1200)
     page.locator('form[action*="allocations/add"] button[type=submit]').click()
     page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(2400)
+
+    # Apply the scenario to live data, then check the dashboard -- projected
+    # personnel cost and risk badges are always computed fresh from live
+    # allocations, so the combined multi-student change shows up immediately.
+    page.locator('form[action*="/apply"] button:has-text("Apply to live")').click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1400)
+    page.get_by_role("link", name="Grant Tracker").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(2200)
+
+    # Plan a new hire: a read-only capacity check -- given a time window and a
+    # department/role/count, does spare grant balance cover it, and how might it
+    # split? Doesn't create anything.
+    page.get_by_role("link", name="Scenarios").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(800)
+    page.get_by_role("link", name="Plan a new hire").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1000)
+
+    plan_form = 'form[action*="plan-new-student"]'
+    set_field(page, f"{plan_form} input[name='window_start']", "2026-09")
+    set_field(page, f"{plan_form} input[name='window_end']", "2027-02")
+    page.wait_for_timeout(500)
+    page.select_option("#hire-add-department", label="Computer Science")
+    page.click('button:has-text("+ Add department/role")')
+    page.wait_for_timeout(400)
+    page.fill('input[name="count[]"]', "2")
+    page.wait_for_timeout(1000)
+    page.click('button:has-text("Calculate")')
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(2800)
 
     select_faculty(page, "Dr Alex Rivera")
     page.wait_for_timeout(2000)
+
+    # Faculty creation can also import grants straight from an Excel report --
+    # bulk-populates a brand-new faculty's grants (with balances) in one step.
+    page.goto(f"{BASE_URL}/faculty")
+    page.wait_for_timeout(600)
+    page.locator("details summary", has_text="New faculty member").click()
+    page.wait_for_timeout(500)
+    page.fill('input[name="name"]', "Dr Priya Desai")
+    page.set_input_files('input[name="workbook"]', str(demo_workbook_path))
+    page.wait_for_timeout(600)
+    page.click('button:has-text("Create database")')
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(2600)
 
 
 def main():
     print("Seeding demo data...")
     seed_demo.seed_maria_santos()
     seed_demo.seed_alex_rivera()
+    # A third faculty ("Dr Priya Desai") gets created live during the walkthrough's
+    # Excel-import beat -- clear out any leftover copy from a previous recording so
+    # the "New faculty member" flow doesn't hit the "already exists" flash instead.
+    (Path(seed_demo.DATA_DIR) / f"{seed_demo.slugify('Dr Priya Desai')}.db").unlink(missing_ok=True)
 
     DEMO_DIR.mkdir(exist_ok=True)
     recording_dir = DEMO_DIR / "_recording"
     recording_dir.mkdir(exist_ok=True)
     for old in recording_dir.glob("*.webm"):
         old.unlink()
+
+    workbook_dir = Path(tempfile.mkdtemp(prefix="grant_tracker_demo_"))
+    demo_workbook_path = workbook_dir / "demo_report.xlsx"
+    build_demo_workbook(demo_workbook_path)
 
     env = {**os.environ, "PORT": str(PORT), "DISABLE_RELOADER": "1"}
     print("Starting app server...")
@@ -231,12 +344,13 @@ def main():
             )
             page = context.new_page()
             print("Recording walkthrough...")
-            run_walkthrough(page)
+            run_walkthrough(page, demo_workbook_path)
             context.close()
             browser.close()
     finally:
         server.terminate()
         server.wait(timeout=10)
+        shutil.rmtree(workbook_dir, ignore_errors=True)
 
     recorded = next(recording_dir.glob("*.webm"))
     webm_path = DEMO_DIR / "grant_tracker_demo.webm"

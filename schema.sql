@@ -22,7 +22,10 @@ CREATE TABLE departments (
     name TEXT NOT NULL,
     stipend_cents_per_month INTEGER NOT NULL DEFAULT 0,
     tuition_cents_per_month INTEGER NOT NULL DEFAULT 0,
-    fringe_rate_bps INTEGER NOT NULL DEFAULT 0
+    fringe_rate_bps INTEGER NOT NULL DEFAULT 0,
+    -- Whether tuition remission is billed for allocation months in June/July/August.
+    -- Some programs don't charge tuition over the summer; see is_summer_month() in app.py.
+    tuition_charged_in_summer INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE students (
@@ -73,3 +76,14 @@ CREATE INDEX idx_transactions_grant ON transactions(grant_id);
 CREATE INDEX idx_allocations_student ON allocations(student_id, scenario_id);
 CREATE INDEX idx_allocations_grant ON allocations(grant_id, scenario_id);
 CREATE INDEX idx_students_department ON students(department_id);
+
+-- Single-row table of tunable knobs. See GRANT_OVERSPEND_RATIO/GRANT_UNDERSPEND_RATIO
+-- in app.py: a grant's projected burn vs. remaining balance is flagged 'overspending'
+-- above overspend_ratio_bps, 'underspending' below underspend_ratio_bps (100 = 1%,
+-- so the default 11500/6000 is 115%/60%, matching the previous hardcoded constants).
+CREATE TABLE settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    overspend_ratio_bps INTEGER NOT NULL DEFAULT 11500,
+    underspend_ratio_bps INTEGER NOT NULL DEFAULT 6000
+);
+INSERT INTO settings (id, overspend_ratio_bps, underspend_ratio_bps) VALUES (1, 11500, 6000);

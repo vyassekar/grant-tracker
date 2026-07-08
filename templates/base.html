@@ -21,6 +21,7 @@
       {% if session.faculty_db %}
       <a href="{{ url_for('departments_page') }}">Departments</a>
       <a href="{{ url_for('scenarios_page') }}">Scenarios</a>
+      <a href="{{ url_for('settings_page') }}">Settings</a>
       <a href="{{ url_for('faculty_page') }}">{{ session.faculty_db | replace("_", " ") | title }} &#9662;</a>
       {% endif %}
       <button type="button" class="theme-toggle" title="Toggle dark/light mode" onclick="

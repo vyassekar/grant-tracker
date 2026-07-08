@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Settings – Grant Tracker{% endblock %}
+{% block content %}
+
+<a href="{{ url_for('index') }}" class="back">&larr; Dashboard</a>
+
+<section>
+  <h1>Settings</h1>
+  <p class="hint">
+    Controls how sensitive the dashboard's spending-risk badges are (see the "Risk" column and hint on the
+    dashboard). A grant is flagged "overspending" when its projected remaining burn rate, extrapolated to its
+    end date, exceeds this percentage of its remaining balance, and "underspending" when that projection falls
+    below the other percentage.
+  </p>
+
+  <form method="post" action="{{ url_for('update_settings') }}" class="form-grid">
+    <label>Overspending threshold (%)
+      <input name="overspend_ratio" type="number" step="0.01" min="0" value="{{ settings.overspend_ratio_bps | rate }}">
+    </label>
+    <label>Underspending threshold (%)
+      <input name="underspend_ratio" type="number" step="0.01" min="0" value="{{ settings.underspend_ratio_bps | rate }}">
+    </label>
+    <button type="submit">Save</button>
+  </form>
+  <p class="hint">Defaults are 115% and 60%. Lower the overspending threshold or raise the underspending
+    threshold to get flagged sooner; the underspending threshold must stay below the overspending one.</p>
+</section>
+
+{% endblock %}

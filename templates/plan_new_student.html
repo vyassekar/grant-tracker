@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Plan a new hire – Grant Tracker{% endblock %}
+{% block content %}
+
+<a href="{{ url_for('scenarios_page') }}" class="back">&larr; Scenarios</a>
+
+<section>
+  <h1>Plan a new hire</h1>
+  <p class="hint">
+    A read-only capacity check: given a time window and a set of new hires (by department and role), do your
+    current grants have enough uncommitted balance to cover them, and if so, how might their effort be split?
+    This doesn't create any students, allocations, or scenarios -- it's just a planning report. Each hire is
+    assumed to need 100% effort for the whole window.
+  </p>
+
+  <form method="get" action="{{ url_for('plan_new_student') }}" class="form-grid">
+    <label>From month <input name="window_start" type="month" value="{{ window_start or today[:7] }}" required></label>
+    <label>To month <input name="window_end" type="month" value="{{ window_end or today[:7] }}" required></label>
+
+    {% if departments %}
+    <div class="alloc-editor">
+      <div class="alloc-rows" id="hire-rows"></div>
+      <div class="alloc-add">
+        <select id="hire-add-department"></select>
+        <button type="button" onclick="addHireRow()">+ Add department/role</button>
+      </div>
+    </div>
+    <button type="submit">Calculate</button>
+    {% else %}
+    <p class="hint">Add at least one department first, on the <a href="{{ url_for('departments_page') }}">Departments</a> page.</p>
+    {% endif %}
+  </form>
+</section>
+
+{% if plans %}
+<section>
+  <h2>Grants considered</h2>
+  <p class="hint">
+    Spare capacity only accounts for commitments within the selected window -- a grant heavily committed just
+    after the window can still show its full uncommitted balance as spare here.
+  </p>
+  {% if excluded_grants %}
+  <p class="hint">
+    Excluded from this window:
+    {% for grant, reason in excluded_grants %}{{ grant.name }} ({{ reason }}){{ ", " if not loop.last }}{% endfor %}.
+  </p>
+  {% endif %}
+</section>
+
+{% for plan in plans %}
+<section>
+  <h2>
+    {{ plan.name }}
+    {% if plan.feasible %}
+    <span class="badge badge-active">Feasible</span>
+    {% else %}
+    <span class="badge badge-risk-overspending">Partial: {{ plan.fully_placed_count }}/{{ plan.requested_count }}</span>
+    {% endif %}
+  </h2>
+  <p class="hint">{{ plan.description }}</p>
+  <div class="stats">
+    <div><span class="stat-label">Hires fully placed</span><span class="stat-value">{{ plan.fully_placed_count }} / {{ plan.requested_count }}</span></div>
+    <div><span class="stat-label">Total cost (window)</span><span class="stat-value">${{ plan.total_cost_cents | money }}</span></div>
+  </div>
+  <table>
+    <thead><tr><th>Department</th><th>Role</th><th>Grant(s)</th><th>Placed</th><th>Window cost</th></tr></thead>
+    <tbody>
+      {% for hire in plan.hires %}
+      <tr>
+        <td>{{ hire.department_name }}</td>
+        <td>{{ hire.role | capitalize }}</td>
+        <td>
+          {% for a in hire.assignments %}
+          <a href="{{ url_for('grant_detail', grant_id=a.grant_id) }}">{{ a.grant_name }}</a>: {{ a.percent }}%{{ ", " if not loop.last }}
+          {% else %}
+          none
+          {% endfor %}
+        </td>
+        <td>{{ hire.placed_pct }}%{% if not hire.feasible %} <span class="badge badge-risk-underspending">short</span>{% endif %}</td>
+        <td>${{ hire.window_cost_cents | money }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endfor %}
+{% endif %}
+
+<script>
+  const allDepartments = {{ departments_json | tojson }};
+  let hireRows = {{ hire_rows_prefill | tojson }};
+
+  function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function addHireRow() {
+    const select = document.getElementById("hire-add-department");
+    const deptId = parseInt(select.value, 10);
+    if (!deptId) return;
+    const dept = allDepartments.find(d => d.id === deptId);
+    hireRows.push({ department_id: dept.id, department_name: dept.name, role: "student", count: 1 });
+    renderHireRows();
+  }
+
+  function removeHireRow(index) {
+    hireRows.splice(index, 1);
+    renderHireRows();
+  }
+
+  function setHireRole(index, value) {
+    hireRows[index].role = value;
+  }
+
+  function setHireCount(index, value) {
+    hireRows[index].count = Math.max(1, parseInt(value, 10) || 1);
+  }
+
+  function renderHireRows() {
+    const rowsEl = document.getElementById("hire-rows");
+    if (!rowsEl) return;
+    rowsEl.innerHTML = hireRows
+      .map((row, i) => (
+        '<div class="alloc-row">' +
+        '<span class="alloc-row-name">' + escapeHtml(row.department_name) + "</span>" +
+        '<input type="hidden" name="department_id[]" value="' + row.department_id + '">' +
+        '<select name="role[]" onchange="setHireRole(' + i + ', this.value)">' +
+        '<option value="student"' + (row.role === "student" ? " selected" : "") + ">Student</option>" +
+        '<option value="postdoc"' + (row.role === "postdoc" ? " selected" : "") + ">Postdoc</option>" +
+        "</select>" +
+        '<input type="number" name="count[]" min="1" step="1" value="' + row.count +
+        '" oninput="setHireCount(' + i + ', this.value)" style="width:4rem">' +
+        '<button type="button" class="alloc-row-remove" onclick="removeHireRow(' + i + ')" title="Remove">&times;</button>' +
+        "</div>"
+      ))
+      .join("");
+
+    const addSelect = document.getElementById("hire-add-department");
+    if (addSelect) {
+      addSelect.innerHTML =
+        '<option value="">Add a department...</option>' +
+        allDepartments.map(d => '<option value="' + d.id + '">' + escapeHtml(d.name) + "</option>").join("");
+    }
+  }
+
+  renderHireRows();
+</script>
+
+{% endblock %}

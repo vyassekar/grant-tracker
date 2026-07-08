@@ -95,6 +95,9 @@
   {% if grid.months_chargeable is defined and false in grid.months_chargeable %}
   <p class="hint">Shaded months are outside {{ student.name }}'s active window ({{ student.start_date or "no start date" }} to {{ student.expected_graduation or "no graduation date" }}) and aren't included in the projected cost.</p>
   {% endif %}
+  {% if under_allocated %}
+  <p class="hint under-allocated-hint">Under 100% allocated in: {{ under_allocated | map(attribute=0) | join(", ") }}. There's unclaimed effort {{ student.name }} could be allocated to a grant in {{ "these months" if under_allocated | length > 1 else "this month" }}.</p>
+  {% endif %}
 
   <div class="stats">
     <div><span class="stat-label">Stipend</span><span class="stat-value">${{ grid.breakdown.stipend | money }}</span></div>

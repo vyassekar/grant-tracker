@@ -36,6 +36,7 @@
         <td>
           <a href="{{ url_for('student_detail', student_id=row.id, scenario=scenario.id) }}">{{ row.name }}</a>
           {% if row.changed %}<span class="badge badge-changed">Changed</span>{% endif %}
+          {% if row.under_allocated_count %}<span class="badge badge-underallocated">Under 100%</span>{% endif %}
         </td>
         <td>${{ row.live_cost_cents | money }}</td>
         <td>${{ row.scenario_cost_cents | money }}</td>

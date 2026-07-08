@@ -59,7 +59,8 @@
   <p class="hint">
     "Risk" flags grants whose current monthly personnel allocation, projected out to the end date, would
     substantially overshoot or undershoot the remaining balance -- a heads-up to rebalance allocations or
-    spend down committed funds, not a hard rule.
+    spend down committed funds, not a hard rule. Adjust how sensitive this is on the
+    <a href="{{ url_for('settings_page') }}">Settings</a> page.
   </p>
 </section>
 
@@ -109,12 +110,18 @@
       <label>Start date <input name="start_date" type="date"></label>
       <label>Expected graduation <input name="expected_graduation" type="date"></label>
       <label>Notes <input name="notes"></label>
+      {% if grants_json %}
+      <h3 class="form-section-title">Initial allocation (optional)</h3>
+      {% set show_student_picker = false %}
+      {% include "_allocation_editor.html" %}
+      {% endif %}
       <button type="submit">Add student</button>
     </form>
     <p class="hint">
       Picking a department fills in its default stipend; edit the amount to override it for this student.
       Manage department stipend/tuition/fringe rates on the <a href="{{ url_for('departments_page') }}">Departments</a> page.
       No personnel cost is projected for allocation months before the start date or after expected graduation.
+      Optionally split their effort across one or more grants right away, or leave it unallocated and set it later.
     </p>
   </details>
   <script>

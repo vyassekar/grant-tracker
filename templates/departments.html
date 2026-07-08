@@ -14,7 +14,7 @@
   </p>
 
   <table>
-    <thead><tr><th>Name</th><th>Stipend / month</th><th>Tuition / month</th><th>Fringe rate</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Stipend / month</th><th>Tuition / month</th><th>Fringe rate</th><th>Summer tuition</th><th></th></tr></thead>
     <tbody>
       {% for d in departments %}
       <tr>
@@ -22,6 +22,7 @@
         <td>${{ d.stipend_cents_per_month | money }}</td>
         <td>${{ d.tuition_cents_per_month | money }}</td>
         <td>{{ d.fringe_rate_bps | rate }}%</td>
+        <td>{{ "Charged" if d.tuition_charged_in_summer else "Not charged" }}</td>
         <td>
           <details>
             <summary>Edit</summary>
@@ -30,6 +31,7 @@
               <label>Stipend / month <input name="stipend" type="number" step="0.01" min="0" value="{{ d.stipend_cents_per_month | money }}"></label>
               <label>Tuition / month <input name="tuition" type="number" step="0.01" min="0" value="{{ d.tuition_cents_per_month | money }}"></label>
               <label>Fringe rate (%) <input name="fringe_rate" type="number" step="0.01" min="0" value="{{ d.fringe_rate_bps | rate }}"></label>
+              <label class="checkbox-label"><input name="tuition_charged_in_summer" type="checkbox" {{ "checked" if d.tuition_charged_in_summer else "" }}> Charge tuition in summer (Jun–Aug)</label>
               <button type="submit">Save</button>
             </form>
             <form method="post" action="{{ url_for('delete_department', department_id=d.id) }}"
@@ -40,7 +42,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" class="empty">No departments yet.</td></tr>
+      <tr><td colspan="6" class="empty">No departments yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -52,8 +54,12 @@
       <label>Stipend / month <input name="stipend" type="number" step="0.01" min="0" value="0"></label>
       <label>Tuition / month <input name="tuition" type="number" step="0.01" min="0" value="0"></label>
       <label>Fringe rate (%) <input name="fringe_rate" type="number" step="0.01" min="0" value="0"></label>
+      <label class="checkbox-label"><input name="tuition_charged_in_summer" type="checkbox" checked> Charge tuition in summer (Jun–Aug)</label>
       <button type="submit">Add department</button>
     </form>
+    <p class="hint">Unchecking "Charge tuition in summer" zeroes the tuition component of cost projections for
+      June, July, and August allocation months for students in that department. Stipend, fringe, and overhead
+      are unaffected.</p>
   </details>
 </section>
 
