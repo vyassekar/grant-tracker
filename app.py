@@ -2,17 +2,37 @@ import calendar
 import re
 import shutil
 import sqlite3
+import sys
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import Path
 
 import openpyxl
+import platformdirs
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 
 BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"
 SCHEMA_PATH = BASE_DIR / "schema.sql"
+
+
+def default_data_dir():
+    """Where faculty .db files live.
+
+    Plain `python app.py` (dev/server use) keeps everything next to the source
+    checkout, as before. A PyInstaller-frozen build (see desktop.py) instead uses
+    the OS's standard per-user data directory -- `sys.frozen`'s extraction location
+    is a temp/read-only-ish path that shouldn't hold persistent user data, and a
+    real user-data dir survives app updates/reinstalls instead of vanishing with the
+    old build. Either way this is a local-only folder; nothing here is ever sent
+    over the network.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(platformdirs.user_data_dir("Grant Tracker", appauthor=False)) / "data"
+    return BASE_DIR / "data"
+
+
+DATA_DIR = default_data_dir()
 EXPIRING_SOON_DAYS = 60
 GRANT_CATEGORIES = {"sponsored", "gift", "internal"}
 

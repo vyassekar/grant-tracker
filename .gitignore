@@ -6,3 +6,6 @@ grants.db
 .claude/
 *.xlsx
 *.swp
+build/
+dist/
+.pytest_cache/

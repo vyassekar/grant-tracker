@@ -1,0 +1,10 @@
+# For the desktop build (see desktop.py / GrantTracker.spec), on top of requirements.txt.
+waitress>=3.0
+# pywebview's own metadata pulls in `pythonnet` automatically on Windows (via an
+# environment marker) for its default WebView2-based backend -- no extra pip line
+# needed here. WebView2 itself ships with Windows 11 and most updated Windows 10
+# installs (via Edge auto-update); pywebview can prompt to install the runtime if
+# it's genuinely missing, but this hasn't been exercised on real Windows hardware,
+# only verified to build via GitHub Actions' windows-latest runner.
+pywebview>=6.0
+pyinstaller>=6.0

@@ -101,3 +101,46 @@ This reseeds the demo data, launches the app on a scratch port, records the
 walkthrough, and writes `demo/grant_tracker_demo.mp4` (falls back to a
 `.webm` if no `ffmpeg` is found on your system — install `ffmpeg` for a
 proper mp4).
+
+## Install as a standalone desktop app (macOS)
+
+Instead of running a dev server and opening a browser tab, you can build Grant
+Tracker into a real `GrantTracker.app` that opens in its own window, with no
+terminal window to keep open. This still runs entirely on your machine — no data
+ever leaves it, there's no server to reach it from the network, and no account or
+internet connection is needed. It's a separate, self-contained data store from the
+dev-server flow above (see where its data lives, below) — the two don't share
+faculty databases automatically.
+
+1. Follow the **Requirements** + first three lines of **Run** above to get a venv
+   with `requirements.txt` installed, then also install the desktop-only
+   dependencies:
+   ```
+   pip install -r requirements-desktop.txt
+   ```
+2. Build the app bundle:
+   ```
+   pyinstaller GrantTracker.spec --noconfirm
+   ```
+   This produces `dist/GrantTracker.app` (~30MB, takes under a minute).
+3. Drag `dist/GrantTracker.app` into `/Applications` (or just double-click it in
+   place — either works).
+4. **First launch only:** since this is an unsigned build (no Apple Developer ID),
+   double-clicking will show a "can't be opened because Apple cannot check it for
+   malicious software" warning. Instead, **right-click (or Control-click)
+   `GrantTracker.app` → Open**, then click **Open** again in the dialog that
+   appears. You only need to do this once — after that, it opens normally like any
+   other app, including from Spotlight/Launchpad.
+
+Its data lives at `~/Library/Application Support/Grant Tracker/data/` (one file per
+faculty member, separate from the `data/` folder used by `python app.py` above) —
+back it up by copying that folder. Quitting the app (Cmd+Q or closing its window)
+stops everything; nothing is left running in the background.
+
+To rebuild after changing the app's code, just re-run step 2 — `dist/` and `build/`
+are safe to delete and regenerate anytime, they're not where your data lives.
+
+(The same `GrantTracker.spec` also builds on Windows via
+`pyinstaller GrantTracker.spec`, producing a `dist/GrantTracker/` folder with
+`GrantTracker.exe` inside — see `.github/workflows/build-desktop.yml` for the
+automated build; this hasn't yet been confirmed running on real Windows hardware.)
