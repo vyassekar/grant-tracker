@@ -7,5 +7,8 @@ grants.db
 *.xlsx
 *.swp
 build/
-dist/
+# dist/GrantTracker.app itself is committed (see dist/README.md) so people can try
+# it without building from source; only the redundant onedir scaffolding next to
+# it is ignored.
+dist/GrantTracker/
 .pytest_cache/

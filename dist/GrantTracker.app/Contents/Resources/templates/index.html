@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Dashboard – Grant Tracker{% endblock %}
+{% block content %}
+
+<section>
+  <h1>Grants</h1>
+  <div class="toggle-bar">
+    <a href="{{ category_clear_url }}" class="toggle {{ 'active' if not category_filter }}">All</a>
+    <a href="{{ category_toggle_urls['sponsored'] }}" class="toggle {{ 'active' if 'sponsored' in category_filter }}">Sponsored</a>
+    <a href="{{ category_toggle_urls['gift'] }}" class="toggle {{ 'active' if 'gift' in category_filter }}">Gift</a>
+    <a href="{{ category_toggle_urls['internal'] }}" class="toggle {{ 'active' if 'internal' in category_filter }}">Internal</a>
+  </div>
+  <div class="toggle-bar">
+    <a href="{{ hide_closed_toggle_url }}" class="toggle {{ 'active' if hide_closed }}">Hide expired/overspent</a>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Category</th><th>Sponsor</th><th>Balance</th><th>Overhead</th><th>Projected personnel</th><th>End date</th><th>Status</th><th>Risk</th></tr>
+    </thead>
+    <tbody>
+      {% for grant in grants %}
+      <tr>
+        <td><a href="{{ url_for('grant_detail', grant_id=grant.id) }}">{{ grant.name }}</a></td>
+        <td><span class="badge badge-category-{{ grant.category }}">{{ grant.category | capitalize }}</span></td>
+        <td>{{ grant.sponsor }}</td>
+        <td>${{ grant.balance_cents | money }} / ${{ grant.total_amount_cents | money }}</td>
+        <td>{{ grant.overhead_rate_bps | rate }}%</td>
+        <td>${{ grant.projected_personnel_cents | money }}</td>
+        <td>{{ grant.end_date }}</td>
+        <td><span class="badge badge-{{ grant.status }}">{{ grant.status }}</span></td>
+        <td>{% if grant.spending_risk %}<span class="badge badge-risk-{{ grant.spending_risk }}">{{ grant.spending_risk | capitalize }}</span>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="empty">No grants{{ " match the current filters" if (category_filter or hide_closed) else " yet" }}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <details>
+    <summary>Add grant</summary>
+    <form method="post" action="{{ url_for('add_grant') }}" class="form-grid">
+      <label>Name <input name="name" required></label>
+      <label>Category
+        <select name="category">
+          <option value="sponsored">Sponsored</option>
+          <option value="gift">Gift</option>
+          <option value="internal">Internal</option>
+        </select>
+      </label>
+      <label>Sponsor <input name="sponsor"></label>
+      <label>Total amount <input name="total_amount" type="number" step="0.01" min="0" required></label>
+      <label>Overhead / F&amp;A rate (%) <input name="overhead_rate" type="number" step="0.01" min="0" value="0"></label>
+      <label>Start date <input name="start_date" type="date" required></label>
+      <label>End date <input name="end_date" type="date" required></label>
+      <label>Notes <input name="notes"></label>
+      <button type="submit">Add grant</button>
+    </form>
+  </details>
+  <p class="hint">
+    "Risk" flags grants whose current monthly personnel allocation, projected out to the end date, would
+    substantially overshoot or undershoot the remaining balance -- a heads-up to rebalance allocations or
+    spend down committed funds, not a hard rule. Adjust how sensitive this is on the
+    <a href="{{ url_for('settings_page') }}">Settings</a> page.
+  </p>
+</section>
+
+<section>
+  <h1>Students</h1>
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Role</th><th>Email</th><th>Department</th><th>Stipend / month</th><th>Start date</th><th>Expected graduation</th></tr>
+    </thead>
+    <tbody>
+      {% for student in students %}
+      <tr>
+        <td><a href="{{ url_for('student_detail', student_id=student.id) }}">{{ student.name }}</a></td>
+        <td><span class="badge badge-role-{{ student.role }}">{{ student.role | capitalize }}</span></td>
+        <td>{{ student.email }}</td>
+        <td>{{ student.department_name or "—" }}</td>
+        <td>${{ student.stipend_cents_per_month | money }}</td>
+        <td>{{ student.start_date or "—" }}</td>
+        <td>{{ student.expected_graduation or "—" }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="empty">No students yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <details>
+    <summary>Add student</summary>
+    <form method="post" action="{{ url_for('add_student') }}" class="form-grid">
+      <label>Name <input name="name" required></label>
+      <label>Role
+        <select name="role">
+          <option value="student">Student</option>
+          <option value="postdoc">Postdoc</option>
+        </select>
+      </label>
+      <label>Email <input name="email" type="email"></label>
+      <label>Department
+        <select name="department_id" onchange="if(this.value){ this.form.stipend.value = (deptStipends[this.value] || 0).toFixed(2); }">
+          <option value="">None</option>
+          {% for d in departments %}
+          <option value="{{ d.id }}">{{ d.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Monthly stipend <input name="stipend" type="number" step="0.01" min="0" value="0"></label>
+      <label>Start date <input name="start_date" type="date"></label>
+      <label>Expected graduation <input name="expected_graduation" type="date"></label>
+      <label>Notes <input name="notes"></label>
+      {% if grants_json %}
+      <h3 class="form-section-title">Initial allocation (optional)</h3>
+      {% set show_student_picker = false %}
+      {% include "_allocation_editor.html" %}
+      {% endif %}
+      <button type="submit">Add student</button>
+    </form>
+    <p class="hint">
+      Picking a department fills in its default stipend; edit the amount to override it for this student.
+      Manage department stipend/tuition/fringe rates on the <a href="{{ url_for('departments_page') }}">Departments</a> page.
+      No personnel cost is projected for allocation months before the start date or after expected graduation.
+      Optionally split their effort across one or more grants right away, or leave it unallocated and set it later.
+    </p>
+  </details>
+  <script>
+    const deptStipends = { {% for d in departments %}{{ d.id }}: {{ d.stipend_cents_per_month | money }}{{ "," if not loop.last }}{% endfor %} };
+  </script>
+</section>
+
+{% endblock %}

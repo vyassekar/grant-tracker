@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Scenarios – Grant Tracker{% endblock %}
+{% block content %}
+
+<a href="{{ url_for('index') }}" class="back">&larr; Dashboard</a>
+
+<section>
+  <h1>What-if scenarios</h1>
+  <p class="hint">
+    A scenario is a copy of your live allocations that you can freely move around without affecting real data.
+    Set the first change below when you create it, then open the scenario to add changes for more students and
+    see the combined effect across all of them in one place.
+  </p>
+  <p><a href="{{ url_for('plan_new_student') }}">Plan a new hire &rarr;</a> -- check whether your grants have
+    enough spare capacity for new students/postdocs over a time window, without creating anything.</p>
+
+  <table>
+    <thead><tr><th>Name</th><th>Created</th><th></th></tr></thead>
+    <tbody>
+      {% for s in scenarios %}
+      <tr>
+        <td><a href="{{ url_for('scenario_detail', scenario_id=s.id) }}">{{ s.name }}</a></td>
+        <td>{{ s.created_at }}</td>
+        <td>
+          <form method="post" action="{{ url_for('apply_scenario', scenario_id=s.id) }}" class="inline-form"
+                onsubmit="return confirm('Apply this scenario to live data? This replaces all current live allocations.');">
+            <button type="submit">Apply to live</button>
+          </form>
+          <form method="post" action="{{ url_for('delete_scenario', scenario_id=s.id) }}" class="inline-form"
+                onsubmit="return confirm('Delete this scenario?');">
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="empty">No scenarios yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <details>
+    <summary>New scenario</summary>
+    <form method="post" action="{{ url_for('add_scenario') }}" class="form-grid">
+      <label>Name <input name="name" placeholder="e.g. Move Alex to NIH grant" required></label>
+      {% if students and grants %}
+      {% include "_allocation_editor.html" %}
+      <button type="submit">Create scenario</button>
+    </form>
+    <p class="hint">
+      Leave Student blank to just start from a plain copy of live data. Otherwise the sliders above set that
+      student's allocation to each grant, for the chosen months, right in the new scenario -- including any
+      grants they're already on, so you can free up percent from one while adding it to another in one save.
+      Add changes for more students after creating it, from the scenario's own page.
+    </p>
+    {% else %}
+      <button type="submit">Create scenario</button>
+    </form>
+    <p class="hint">Add at least one student and one grant first to set an allocation change here.</p>
+    {% endif %}
+</section>
+
+{% endblock %}
